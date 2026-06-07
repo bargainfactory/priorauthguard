@@ -80,6 +80,46 @@ async fn transcribe_audio(
     })
 }
 
+#[derive(serde::Serialize)]
+pub struct UpdateCheckResult {
+    pub available: bool,
+    pub current_version: String,
+    pub new_version: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Check for an update via the configured Tauri updater endpoint.
+///
+/// The frontend invokes this on demand (e.g. from a "Check for updates"
+/// menu item). The updater plugin handles signature verification using
+/// the public key baked into `tauri.conf.json` — only manifests signed by
+/// the matching private key are accepted.
+#[tauri::command]
+async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let current = app.package_info().version.to_string();
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater unavailable: {}", e))?;
+
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateCheckResult {
+            available: true,
+            current_version: current,
+            new_version: Some(update.version.clone()),
+            notes: update.body.clone(),
+        }),
+        Ok(None) => Ok(UpdateCheckResult {
+            available: false,
+            current_version: current,
+            new_version: None,
+            notes: None,
+        }),
+        Err(e) => Err(format!("update check failed: {}", e)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -87,10 +127,15 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             engine: Mutex::new(None),
         })
-        .invoke_handler(tauri::generate_handler![whisper_status, transcribe_audio])
+        .invoke_handler(tauri::generate_handler![
+            whisper_status,
+            transcribe_audio,
+            check_for_update,
+        ])
         .setup(|app| {
             tracing::info!("PriorAuthGuard desktop starting");
             // Ensure the app data dir exists so the user can drop a model in.

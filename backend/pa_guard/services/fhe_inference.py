@@ -85,14 +85,31 @@ class PlaintextBaseline(Protocol):
 
 
 class _DenialRiskBaseline:
-    """A trivial linear-ish denial-risk scorer used only as a stand-in.
+    """Trained denial-risk scorer.
 
-    Real circuit (Phase 2) is a small QAT-Brevitas tabular classifier; this
-    keeps the integration testable end-to-end *today*.
+    Loads the persisted logistic-regression weights at construction
+    time. When the weights file is missing (e.g., a fresh checkout
+    that hasn't run the training script yet) it falls back to a
+    deterministic heuristic so the rest of the platform keeps working.
+
+    The Brevitas-QAT FHE circuit in `fhe_pipeline.py` shares the same
+    feature pipeline (`_featurize`) and target distribution as this
+    baseline, so plaintext and FHE outputs stay aligned.
     """
 
+    def __init__(self) -> None:
+        self._model: object | None = None
+        try:
+            from .denial_risk_model import DenialRiskModel
+
+            self._model = DenialRiskModel.load()
+        except (FileNotFoundError, ImportError):
+            self._model = None
+
     def predict(self, features: dict[str, float | int | str]) -> float:
-        # Crude denial-risk heuristic on a few well-known signals.
+        if self._model is not None:
+            return float(self._model.predict_proba(features))  # type: ignore[attr-defined]
+        # Fallback heuristic — only fires if the weights file is missing.
         urgency = str(features.get("urgency", "routine"))
         prior_denials = float(features.get("prior_denials", 0))
         missing_docs = float(features.get("missing_docs_count", 0))

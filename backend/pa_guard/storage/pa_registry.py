@@ -1,10 +1,16 @@
 """PA registry — tenant-scoped persistence for `PARunResponse`-shaped records.
 
-v1.0 GA: every method takes a `tenant_id`. Two implementations:
+v1.0.3: filters (status / urgency / payer_id) push **into** the registry so
+SQL backends translate them to indexed JSON predicates rather than
+over-fetching and post-filtering in Python.
+
+Two implementations:
 
 - `InMemoryPARegistry`: nested dict-of-dicts keyed by tenant.
-- `SqlPARegistry`: SQLAlchemy async + JSON payload column; the schema adds a
-  `(tenant_id, updated_at DESC)` index for fast per-tenant listing.
+- `SqlPARegistry`: SQLAlchemy async + JSON payload column; uses
+  Postgres `payload->'pa_request'->'meta'->>'payer_id'` predicates and
+  the equivalent SQLite `json_extract(payload, '$.pa_request.meta.payer_id')`
+  so filters are evaluated server-side.
 
 Both expose the same Protocol so swapping is a one-line change in the
 FastAPI lifespan.
@@ -13,9 +19,25 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
+
+
+@dataclass(frozen=True)
+class PAListFilters:
+    """Server-side filter shape for `list_recent`.
+
+    Every field is optional; `None` means "no constraint".
+    """
+
+    status: str | None = None
+    urgency: str | None = None
+    payer_id: str | None = None
+
+    def is_empty(self) -> bool:
+        return self.status is None and self.urgency is None and self.payer_id is None
 
 
 class PARegistry(Protocol):
@@ -28,7 +50,11 @@ class PARegistry(Protocol):
         self, tenant_id: str, request_id: UUID
     ) -> dict[str, Any] | None: ...
     async def list_recent(
-        self, tenant_id: str, *, limit: int = 50
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 50,
+        filters: PAListFilters | None = None,
     ) -> Iterable[dict[str, Any]]: ...
 
 
@@ -56,13 +82,42 @@ class InMemoryPARegistry:
         return self._by_tenant.get(tenant_id, {}).get(str(request_id))
 
     async def list_recent(
-        self, tenant_id: str, *, limit: int = 50
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 50,
+        filters: PAListFilters | None = None,
     ) -> Iterable[dict[str, Any]]:
         if limit <= 0:
             return []
         bucket = self._by_tenant.get(tenant_id, {})
         order = self._order.get(tenant_id, [])
-        return [bucket[r] for r in order[-limit:][::-1] if r in bucket]
+        f = filters or PAListFilters()
+        out: list[dict[str, Any]] = []
+        for rid in reversed(order):
+            if rid not in bucket:
+                continue
+            row = bucket[rid]
+            if not _row_matches(row, f):
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
+
+def _row_matches(row: dict[str, Any], f: PAListFilters) -> bool:
+    if f.status is not None and row.get("status") != f.status:
+        return False
+    meta = (row.get("pa_request") or {}).get("meta") if row.get("pa_request") else None
+    if f.urgency is not None or f.payer_id is not None:
+        if meta is None:
+            return False
+        if f.urgency is not None and meta.get("urgency") != f.urgency:
+            return False
+        if f.payer_id is not None and meta.get("payer_id") != f.payer_id:
+            return False
+    return True
 
 
 class SqlPARegistry:
@@ -188,23 +243,61 @@ class SqlPARegistry:
         return raw if isinstance(raw, dict) else json.loads(raw)
 
     async def list_recent(
-        self, tenant_id: str, *, limit: int = 50
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 50,
+        filters: PAListFilters | None = None,
     ) -> Iterable[dict[str, Any]]:
         from sqlalchemy import text
 
         await self._ensure_schema()
+        f = filters or PAListFilters()
+
+        # Build the WHERE clause with dialect-specific JSON predicates.
+        clauses: list[str] = ["tenant_id = :tid"]
+        params: dict[str, Any] = {"tid": tenant_id, "limit": int(limit)}
+
+        if f.status is not None:
+            clauses.append(self._json_eq("status") + " = :status")
+            params["status"] = f.status
+        if f.payer_id is not None:
+            clauses.append(self._json_meta_eq("payer_id") + " = :payer_id")
+            params["payer_id"] = f.payer_id
+        if f.urgency is not None:
+            clauses.append(self._json_meta_eq("urgency") + " = :urgency")
+            params["urgency"] = f.urgency
+
+        # `where` is composed exclusively from `clauses`, which come from
+        # a fixed set of dialect-aware JSON predicates plus bound params.
+        # No user input ever lands inside the `text(...)` literal — safe
+        # by construction.
+        where = " AND ".join(clauses)
+        sql = (
+            "SELECT payload FROM pa_runs "  # noqa: S608
+            f"WHERE {where} "
+            "ORDER BY updated_at DESC LIMIT :limit"
+        )
+        query = text(sql)
         async with self._engine.connect() as conn:
-            rows = (
-                await conn.execute(
-                    text(
-                        "SELECT payload FROM pa_runs "
-                        "WHERE tenant_id = :tid "
-                        "ORDER BY updated_at DESC LIMIT :limit"
-                    ),
-                    {"tid": tenant_id, "limit": int(limit)},
-                )
-            ).all()
+            rows = (await conn.execute(query, params)).all()
         return [r[0] if isinstance(r[0], dict) else json.loads(r[0]) for r in rows]
 
+    # ------------------------------------------------------------------
+    # Dialect-aware JSON path expressions.
+    # ------------------------------------------------------------------
 
-__all__ = ["InMemoryPARegistry", "PARegistry", "SqlPARegistry"]
+    def _json_eq(self, key: str) -> str:
+        """Top-level scalar (e.g. payload['status'])."""
+        if self._is_postgres:
+            return f"payload->>'{key}'"
+        return f"json_extract(payload, '$.{key}')"
+
+    def _json_meta_eq(self, key: str) -> str:
+        """Nested scalar at payload['pa_request']['meta'][key]."""
+        if self._is_postgres:
+            return f"payload->'pa_request'->'meta'->>'{key}'"
+        return f"json_extract(payload, '$.pa_request.meta.{key}')"
+
+
+__all__ = ["InMemoryPARegistry", "PAListFilters", "PARegistry", "SqlPARegistry"]

@@ -121,6 +121,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Desktop auto-updater (v1.0.3) ---
+    update_manifest_path: Path = Field(
+        default=Path("data/desktop-updates.json"),
+        description=(
+            "Path to a JSON manifest in Tauri-updater format. Ops publishes "
+            "new releases by updating this file. Unset/missing → endpoint "
+            "returns 204."
+        ),
+    )
+
     # --- SLOs (v1.0.2) ---
     # Targets are deployment-tunable; defaults match the v1.0 GA baseline.
     slo_denial_rate_max: float = Field(default=0.20, ge=0.0, le=1.0)

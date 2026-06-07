@@ -50,5 +50,16 @@
     "windows": {
       "wix": { "language": "en-US" }
     }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://updates.priorauthguard.com/desktop/{{target}}/{{current_version}}",
+        "http://127.0.0.1:8080/v1/updates/desktop/{{target}}/{{current_version}}"
+      ],
+      "dialog": true,
+      "pubkey": "PASTE-YOUR-MINISIGN-PUBKEY-HERE"
+    }
   }
 }

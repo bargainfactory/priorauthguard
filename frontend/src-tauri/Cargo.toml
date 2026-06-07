@@ -19,6 +19,9 @@ tauri-plugin-shell = "2.0"
 tauri-plugin-fs = "2.0"
 tauri-plugin-dialog = "2.0"
 tauri-plugin-log = "2.0"
+# Tauri auto-updater — fetches a signed manifest from the backend, verifies
+# the embedded public key, and prompts the user before applying the update.
+tauri-plugin-updater = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

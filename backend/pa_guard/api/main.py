@@ -65,7 +65,13 @@ from ..payers.registry import PayerAdapterRegistry
 from ..services.fhe_inference import FHEInferenceService
 from ..services.slo import SloEvaluator
 from ..services.zkstark import ZkStarkVerifier
-from ..storage.pa_registry import InMemoryPARegistry, PARegistry, SqlPARegistry
+from ..storage.pa_registry import (
+    InMemoryPARegistry,
+    PAListFilters,
+    PARegistry,
+    SqlPARegistry,
+)
+from .updates import router as updates_router
 from .voice_stream import router as voice_stream_router
 
 
@@ -149,6 +155,8 @@ app.add_middleware(
 )
 # WebSocket streaming voice (Phase 5).
 app.include_router(voice_stream_router)
+# Desktop update manifest (consumed by tauri-plugin-updater).
+app.include_router(updates_router)
 
 
 # ---------------------------------------------------------------------------
@@ -306,44 +314,22 @@ async def list_pa(
 ) -> list[PARunResponse]:
     """List recent PAs for the active tenant.
 
-    Optional filters:
-      - `status`     — PA lifecycle status (e.g. `submitted`, `denied`).
-      - `urgency`    — `routine` | `urgent` | `emergent`.
-      - `payer_id`   — exact payer match.
-
-    We over-fetch (3x) then filter in Python so the filter set stays
-    open without forcing every backend to support a query DSL. SQL
-    push-down is a Phase 7 follow-up; until then this is the same
-    semantics as the dashboard's RoiCards aggregation.
+    Filters push down into the registry — Postgres uses JSONB path
+    predicates (`payload->'pa_request'->'meta'->>'payer_id'`), SQLite
+    uses `json_extract`, and the in-memory backend filters per-row before
+    capping at `limit`. No Python-side over-fetch is required.
     """
     tenant_id = x_tenant_id or "default"
     registry: PARegistry = app.state.pa_registry
+    filters = PAListFilters(status=status, urgency=urgency, payer_id=payer_id)
 
-    over_fetch = max(limit * 3, limit + 50) if (status or urgency or payer_id) else limit
-    rows = await registry.list_recent(tenant_id, limit=over_fetch)
+    rows = await registry.list_recent(tenant_id, limit=limit, filters=filters)
     out: list[PARunResponse] = []
     for raw in rows:
         try:
-            response = PARunResponse.model_validate(raw)
+            out.append(PARunResponse.model_validate(raw))
         except Exception as exc:
-            # Stale registry rows from older schemas can fail validation;
-            # skip them rather than 500 the whole list.
             get_logger("api").warning("pa_list_row_invalid", error=str(exc))
-            continue
-        if status and response.status != status:
-            continue
-        meta = response.pa_request.meta if response.pa_request else None
-        if meta is not None:
-            if urgency and meta.urgency != urgency:
-                continue
-            if payer_id and meta.payer_id != payer_id:
-                continue
-        elif urgency or payer_id:
-            # No meta available — can't satisfy the constraint, skip.
-            continue
-        out.append(response)
-        if len(out) >= limit:
-            break
     return out
 
 

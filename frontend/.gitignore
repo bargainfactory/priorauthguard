@@ -28,3 +28,8 @@ pnpm-debug.log*
 # TypeScript / eslint caches
 *.tsbuildinfo
 .eslintcache
+
+# Playwright artifacts
+playwright-report/
+playwright/.cache/
+test-results/
