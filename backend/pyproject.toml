@@ -106,6 +106,7 @@ markers = [
     "fhe: tests that exercise the FHE inference path",
     "voice: tests that exercise the voice pipeline",
     "compliance: HIPAA / Safe Harbor / jurisdiction tests",
+    "live_sandbox: tests that hit real payer sandbox APIs (require PAG_RUN_LIVE_SANDBOX_TESTS=true)",
 ]
 
 [tool.ruff]

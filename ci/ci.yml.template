@@ -6,6 +6,12 @@ on:
     tags: ["v*.*.*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_live_sandbox:
+        description: "Run live payer sandbox tests"
+        required: false
+        default: "true"
 
 permissions:
   contents: read
@@ -85,6 +91,90 @@ jobs:
       - run: pnpm lint
       - run: pnpm type-check
       - run: pnpm build
+
+  # -----------------------------------------------------------------------
+  # Native Rust FRI prover/verifier — multi-platform wheel build.
+  # Runs on every PR (build + self-test) and uploads wheels on tag.
+  # -----------------------------------------------------------------------
+  zkstark-native:
+    name: zkstark-native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            wheel_target: manylinux
+          - os: macos-14
+            wheel_target: macos-arm64
+          - os: macos-13
+            wheel_target: macos-x86_64
+          - os: windows-2022
+            wheel_target: win_amd64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: native/zkstark-accel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin
+      - name: Build wheel
+        run: maturin build --release --strip
+      - name: Self-test wheel
+        run: |
+          pip install --no-index --find-links=target/wheels zkstark_native
+          python -c "import zkstark_native; assert zkstark_native._selftest()"
+          python -c "
+          import zkstark_native
+          blob = zkstark_native.prove('m', 'a'*64, 'b'*64)
+          assert zkstark_native.verify('m', 'a'*64, 'b'*64, blob)
+          # tampered must reject
+          assert not zkstark_native.verify('m', 'c'*64, 'b'*64, blob)
+          "
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: zkstark-native-${{ matrix.wheel_target }}
+          path: native/zkstark-accel/target/wheels/*
+
+  # -----------------------------------------------------------------------
+  # Live payer sandbox tests — manual-only; needs provisioned secrets.
+  # -----------------------------------------------------------------------
+  live-sandbox:
+    name: Payer live sandbox
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" aiosqlite
+      - name: Run live sandbox suite
+        env:
+          PAG_RUN_LIVE_SANDBOX_TESTS: "true"
+          PAG_PAYER_SANDBOX_MODE: "true"
+          PAG_AVAILITY_CLIENT_ID: ${{ secrets.AVAILITY_CLIENT_ID }}
+          PAG_AVAILITY_CLIENT_SECRET: ${{ secrets.AVAILITY_CLIENT_SECRET }}
+          PAG_AVAILITY_BASE_URL: ${{ secrets.AVAILITY_BASE_URL }}
+          PAG_COVERMYMEDS_API_KEY: ${{ secrets.COVERMYMEDS_API_KEY }}
+          PAG_COVERMYMEDS_BASE_URL: ${{ secrets.COVERMYMEDS_BASE_URL }}
+          PAG_SURESCRIPTS_CLIENT_ID: ${{ secrets.SURESCRIPTS_CLIENT_ID }}
+          PAG_SURESCRIPTS_CLIENT_SECRET: ${{ secrets.SURESCRIPTS_CLIENT_SECRET }}
+          PAG_SURESCRIPTS_BASE_URL: ${{ secrets.SURESCRIPTS_BASE_URL }}
+          PAG_NHS_SPINE_API_KEY: ${{ secrets.NHS_SPINE_API_KEY }}
+          PAG_NHS_SPINE_BASE_URL: ${{ secrets.NHS_SPINE_BASE_URL }}
+        run: pytest -q -m live_sandbox tests/integration
 
   # -----------------------------------------------------------------------
   # Docker image — built on every tag, multi-arch, cosign-signed (keyless).

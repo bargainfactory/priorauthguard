@@ -13,6 +13,7 @@ import type {
   OutcomeAggregate,
   PARunResponse,
   ReadyzResponse,
+  SloSnapshot,
   ZkStarkProof,
 } from "@/types/api";
 
@@ -102,6 +103,23 @@ export function getPA(rid: string, signal?: AbortSignal) {
   return request<PARunResponse>(`/v1/pa/${rid}`, { signal });
 }
 
+export interface ListPAFilters {
+  limit?: number;
+  status?: string;
+  urgency?: "routine" | "urgent" | "emergent";
+  payer_id?: string;
+}
+
+export function listPA(filters: ListPAFilters = {}, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.status) params.set("status", filters.status);
+  if (filters.urgency) params.set("urgency", filters.urgency);
+  if (filters.payer_id) params.set("payer_id", filters.payer_id);
+  const qs = params.toString();
+  return request<PARunResponse[]>(`/v1/pa${qs ? `?${qs}` : ""}`, { signal });
+}
+
 // ---------------------------------------------------------------------------
 // Voice
 // ---------------------------------------------------------------------------
@@ -124,6 +142,13 @@ export function transcribeDictation(
 export function getAggregate(windowSeconds = 0, signal?: AbortSignal) {
   return request<OutcomeAggregate>(
     `/v1/outcomes/aggregate?window_seconds=${windowSeconds}`,
+    { signal },
+  );
+}
+
+export function getSloSnapshot(windowSeconds = 0, signal?: AbortSignal) {
+  return request<SloSnapshot>(
+    `/v1/slo/snapshot?window_seconds=${windowSeconds}`,
     { signal },
   );
 }

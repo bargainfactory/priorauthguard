@@ -129,6 +129,27 @@ export interface PARunResponse {
   clarification_questions: string[];
 }
 
+export type SloStatus = "met" | "at-risk" | "breached";
+
+export interface SloTargetReport {
+  slo_id: string;
+  description: string;
+  target: number;
+  actual: number;
+  unit: string;
+  direction: "lt" | "gt";
+  status: SloStatus;
+  error_budget_burn: number;
+}
+
+export interface SloSnapshot {
+  window_seconds: number;
+  sample_count: number;
+  overall_status: SloStatus;
+  reports: SloTargetReport[];
+  computed_at: string;
+}
+
 export interface OutcomeAggregate {
   window_seconds: number;
   sample_count: number;

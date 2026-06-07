@@ -7,16 +7,20 @@ import {
   Building2,
   Gauge,
   KeyRound,
+  ListChecks,
   ShieldCheck,
   Sparkles,
   Stethoscope,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: Gauge },
+  { href: "/pa", label: "PA runs", icon: ListChecks },
   { href: "/intake", label: "New PA", icon: Stethoscope },
   { href: "/voice", label: "Voice", icon: AudioLines },
+  { href: "/slo", label: "SLOs", icon: TrendingUp },
   { href: "/meta-improver", label: "Meta-Improver", icon: Sparkles },
   { href: "/zk", label: "zk-STARK", icon: KeyRound },
   { href: "/admin", label: "Tenants", icon: Building2 },

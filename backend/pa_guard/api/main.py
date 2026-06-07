@@ -56,12 +56,14 @@ from ..core.models import (
     PARequestMeta,
     PolicyEvidence,
     RawClinicalNote,
+    SloSnapshot,
     SubmissionReceipt,
     ZkStarkProof,
 )
 from ..core.otel import configure_otel
 from ..payers.registry import PayerAdapterRegistry
 from ..services.fhe_inference import FHEInferenceService
+from ..services.slo import SloEvaluator
 from ..services.zkstark import ZkStarkVerifier
 from ..storage.pa_registry import InMemoryPARegistry, PARegistry, SqlPARegistry
 from .voice_stream import router as voice_stream_router
@@ -297,12 +299,65 @@ async def get_pa(
 @app.get("/v1/pa", response_model=list[PARunResponse], tags=["pa"])
 async def list_pa(
     limit: int = 50,
+    status: str | None = None,
+    urgency: str | None = None,
+    payer_id: str | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
 ) -> list[PARunResponse]:
+    """List recent PAs for the active tenant.
+
+    Optional filters:
+      - `status`     — PA lifecycle status (e.g. `submitted`, `denied`).
+      - `urgency`    — `routine` | `urgent` | `emergent`.
+      - `payer_id`   — exact payer match.
+
+    We over-fetch (3x) then filter in Python so the filter set stays
+    open without forcing every backend to support a query DSL. SQL
+    push-down is a Phase 7 follow-up; until then this is the same
+    semantics as the dashboard's RoiCards aggregation.
+    """
     tenant_id = x_tenant_id or "default"
     registry: PARegistry = app.state.pa_registry
-    rows = await registry.list_recent(tenant_id, limit=limit)
-    return [PARunResponse.model_validate(r) for r in rows]
+
+    over_fetch = max(limit * 3, limit + 50) if (status or urgency or payer_id) else limit
+    rows = await registry.list_recent(tenant_id, limit=over_fetch)
+    out: list[PARunResponse] = []
+    for raw in rows:
+        try:
+            response = PARunResponse.model_validate(raw)
+        except Exception as exc:
+            # Stale registry rows from older schemas can fail validation;
+            # skip them rather than 500 the whole list.
+            get_logger("api").warning("pa_list_row_invalid", error=str(exc))
+            continue
+        if status and response.status != status:
+            continue
+        meta = response.pa_request.meta if response.pa_request else None
+        if meta is not None:
+            if urgency and meta.urgency != urgency:
+                continue
+            if payer_id and meta.payer_id != payer_id:
+                continue
+        elif urgency or payer_id:
+            # No meta available — can't satisfy the constraint, skip.
+            continue
+        out.append(response)
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get("/v1/slo/snapshot", response_model=SloSnapshot, tags=["outcomes"])
+async def slo_snapshot(window_seconds: int = 0) -> SloSnapshot:
+    """SLO compliance snapshot derived from the current outcome aggregate.
+
+    Returns per-SLO `met` / `at-risk` / `breached` status plus a budget-burn
+    figure renderable as a progress bar.
+    """
+    supervisor: PASupervisor = app.state.supervisor
+    aggregate = await supervisor.outcome_logger.aggregate(window_seconds=window_seconds)
+    evaluator = SloEvaluator(settings=get_settings())
+    return evaluator.evaluate(aggregate)
 
 
 class AppealRequestBody(BaseModel):

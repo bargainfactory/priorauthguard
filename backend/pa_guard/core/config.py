@@ -121,6 +121,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- SLOs (v1.0.2) ---
+    # Targets are deployment-tunable; defaults match the v1.0 GA baseline.
+    slo_denial_rate_max: float = Field(default=0.20, ge=0.0, le=1.0)
+    slo_pipeline_p99_latency_ms_max: float = Field(default=5000.0, gt=0.0)
+    slo_fhe_executed_share_min: float = Field(default=0.80, ge=0.0, le=1.0)
+    slo_on_device_voice_share_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    slo_agent_success_rate_min: float = Field(default=0.95, ge=0.0, le=1.0)
+
     # --- OpenTelemetry observability (v1.0.1) ---
     otel_enabled: bool = Field(
         default=False,

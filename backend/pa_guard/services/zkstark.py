@@ -465,6 +465,22 @@ class ZkStarkProver:
         if not self._settings.zkstark_enabled:
             self._log.info("zkstark_disabled_returning_deterministic_proof")
 
+        # Native short-circuit: when the Rust wheel is installed it produces
+        # a byte-for-byte identical proof — drop straight into it.
+        if zkstark_native.HAS_NATIVE_PROVE:
+            blob = zkstark_native.prove(
+                inputs.model_commitment,
+                inputs.input_hash,
+                inputs.output_hash,
+            )
+            self._log.info("zkstark_proved_native")
+            return ZkStarkProof(
+                model_commitment=inputs.model_commitment,
+                input_hash=inputs.input_hash,
+                output_hash=inputs.output_hash,
+                proof_blob=bytes(blob),
+            )
+
         poly_coeffs = _build_secret_polynomial(inputs)
         omega = primitive_nth_root(_DOMAIN_SIZE)
         layer = poly_eval_domain(poly_coeffs, omega, _DOMAIN_SIZE)
@@ -541,6 +557,24 @@ class ZkStarkVerifier:
         self._log = get_logger("ZkStarkVerifier")
 
     async def verify(self, proof: ZkStarkProof) -> bool:
+        # Native short-circuit. The Rust verifier accepts the exact same
+        # PAGF1 byte format the Python prover emits, and vice versa.
+        if zkstark_native.HAS_NATIVE_VERIFY:
+            try:
+                ok = bool(
+                    zkstark_native.verify(
+                        proof.model_commitment,
+                        proof.input_hash,
+                        proof.output_hash,
+                        bytes(proof.proof_blob),
+                    )
+                )
+            except Exception as exc:
+                self._log.warning("zkstark_verify_native_error", error=str(exc))
+                return False
+            self._log.info("zkstark_verified_native", ok=ok)
+            return ok
+
         try:
             bundle = FriProofBundle.from_bytes(proof.proof_blob)
         except Exception as exc:

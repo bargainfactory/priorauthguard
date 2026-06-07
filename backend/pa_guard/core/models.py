@@ -510,6 +510,41 @@ class ImprovementProposal(_StrictModel):
     approved_at: datetime | None = None
 
 
+class SloStatus(StrEnum):
+    MET = "met"
+    AT_RISK = "at-risk"
+    BREACHED = "breached"
+
+
+class SloTargetReport(_StrictModel):
+    """A single SLO's evaluation."""
+
+    slo_id: str
+    description: str
+    target: float
+    actual: float
+    unit: str
+    direction: Literal["lt", "gt"]
+    status: SloStatus
+    error_budget_burn: float = Field(
+        ge=0.0,
+        description=(
+            "Greater = closer to breach. 0 = perfect; ≥ 1 = breached. "
+            "Clipped to 2 for renderability."
+        ),
+    )
+
+
+class SloSnapshot(_StrictModel):
+    """Aggregate SLO status for the current window."""
+
+    window_seconds: int
+    sample_count: int
+    overall_status: SloStatus
+    reports: list[SloTargetReport] = Field(default_factory=list)
+    computed_at: datetime = Field(default_factory=_utcnow)
+
+
 class OutcomeAggregate(_StrictModel):
     """Roll-up statistics computed by `OutcomeLogger.aggregate()`."""
 
@@ -571,6 +606,9 @@ __all__ = [
     "RawClinicalNote",
     "SafeClinicalContext",
     "SensitivityTier",
+    "SloSnapshot",
+    "SloStatus",
+    "SloTargetReport",
     "SubmissionChannel",
     "SubmissionReceipt",
     "VoiceCallOutcome",
