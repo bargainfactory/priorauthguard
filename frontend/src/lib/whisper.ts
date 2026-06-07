@@ -16,6 +16,28 @@
 
 import { getPlatform } from "@/lib/platform";
 
+/**
+ * Load an optional native module without letting Webpack / Turbopack
+ * follow the specifier into its dependency graph.
+ *
+ * Why: `@pa-guard/on-device-whisper` only exists when the Capacitor shell
+ * has installed it; on the web build the package is absent and a literal
+ * `await import("@pa-guard/on-device-whisper")` would fail at compile
+ * time with `Module not found`. Constructing the import via `new Function`
+ * gives the bundler a non-literal specifier, so it emits a runtime native
+ * dynamic import — which resolves on Capacitor and cleanly rejects
+ * everywhere else.
+ *
+ * `unsafe-eval` is already in the Tauri CSP; Next.js dev has no CSP. The
+ * helper is safe across every supported runtime.
+ */
+export async function loadOptionalNativeModule<T = unknown>(
+  specifier: string,
+): Promise<T> {
+  const dynImport = new Function("s", "return import(s)") as (s: string) => Promise<T>;
+  return dynImport(specifier);
+}
+
 export interface OnDeviceTranscript {
   text: string;
   modelName: string;
@@ -84,9 +106,18 @@ export async function recordAndTranscribeCapacitor(
   if (platform !== "capacitor") {
     throw new WhisperUnavailableError("Capacitor runtime required.");
   }
-  const { OnDeviceWhisper } = await import(
-    /* @vite-ignore */ "@pa-guard/on-device-whisper"
-  ).catch(() => {
+  const { OnDeviceWhisper } = await loadOptionalNativeModule<{
+    OnDeviceWhisper: {
+      requestMicrophonePermission(): Promise<{ granted: boolean }>;
+      startRecording(opts: { sampleRate: number }): Promise<unknown>;
+      stopRecording(): Promise<{ wavPath: string }>;
+      transcribe(opts: {
+        wavPath: string;
+        language: string;
+        deleteAudioAfter: boolean;
+      }): Promise<{ text: string; modelName: string; durationMs: number }>;
+    };
+  }>("@pa-guard/on-device-whisper").catch(() => {
     throw new WhisperUnavailableError(
       "@pa-guard/on-device-whisper plugin not installed in this Capacitor app.",
     );

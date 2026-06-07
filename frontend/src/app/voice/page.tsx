@@ -18,7 +18,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { transcribeDictation } from "@/lib/api";
 import { startBrowserRecording, type RecordingHandle } from "@/lib/audio";
 import { getPlatform, isNative } from "@/lib/platform";
-import { transcribeOnDevice } from "@/lib/whisper";
+import { loadOptionalNativeModule, transcribeOnDevice } from "@/lib/whisper";
+
+type OnDeviceWhisperPlugin = {
+  requestMicrophonePermission(): Promise<{ granted: boolean }>;
+  startRecording(opts: { sampleRate: number }): Promise<unknown>;
+  stopRecording(): Promise<{ wavPath: string }>;
+  transcribe(opts: {
+    wavPath: string;
+    language: string;
+    deleteAudioAfter: boolean;
+  }): Promise<{ text: string; modelName: string; durationMs: number }>;
+};
+
+async function getOnDeviceWhisper(): Promise<OnDeviceWhisperPlugin> {
+  const mod = await loadOptionalNativeModule<{ OnDeviceWhisper: OnDeviceWhisperPlugin }>(
+    "@pa-guard/on-device-whisper",
+  );
+  return mod.OnDeviceWhisper;
+}
 import { formatMs } from "@/lib/utils";
 import type { DictationResponse } from "@/types/api";
 
@@ -43,9 +61,7 @@ export default function VoicePage() {
       if (platform === "capacitor") {
         // Capacitor's native plugin handles capture entirely on-device; the
         // page just dispatches to it and surfaces the resulting text.
-        const { OnDeviceWhisper } = await import(
-          /* @vite-ignore */ "@pa-guard/on-device-whisper"
-        );
+        const OnDeviceWhisper = await getOnDeviceWhisper();
         const perm = await OnDeviceWhisper.requestMicrophonePermission();
         if (!perm.granted) {
           toast.error("Microphone permission denied");
@@ -73,9 +89,7 @@ export default function VoicePage() {
     setBusy(true);
     try {
       if (platform === "capacitor") {
-        const { OnDeviceWhisper } = await import(
-          /* @vite-ignore */ "@pa-guard/on-device-whisper"
-        );
+        const OnDeviceWhisper = await getOnDeviceWhisper();
         const stop = await OnDeviceWhisper.stopRecording();
         const out = await OnDeviceWhisper.transcribe({
           wavPath: stop.wavPath,
