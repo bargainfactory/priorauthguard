@@ -20,7 +20,7 @@ PriorAuthGuard is a production-grade autonomous multi-agent system that takes a 
 | **1** | LangGraph supervisor • Intake / PolicyResearcher / DocumentGenerator / Submission / DenialAppeal / ComplianceAuditor / OutcomeLogger • RAG • jurisdiction rule packs (US 50+DC+fed, Canada fed+13, UK) • learned NER overlay • cloud voice adapters | ✅ shipped |
 | **2** | Production Concrete ML FHE pipeline (Brevitas QAT) • real zk-STARK (Merkle + Fiat-Shamir + opening) • MetaImproverAgent (human-gated) • OutcomeLogger Postgres/SQLite sink + aggregations • expanded rule packs (14 US states + 13 CA provinces/territories) | ✅ shipped |
 | **3** | Next.js 15 web frontend (light + dark) • Dashboard • `PrivacyFHEPanel.tsx` reference component • Intake wizard • PA detail • Voice console • Meta-Improver review • zk-STARK verifier | ✅ shipped |
-| 4 | Tauri + Capacitor + native on-device Whisper | planned |
+| **4** | Tauri 2 desktop shell with real whisper-rs integration • Capacitor 6 mobile scaffold • custom `OnDeviceWhisper` plugin (iOS Swift + Android Kotlin + JNI/whisper.cpp) • unified platform-aware Whisper bridge • browser audio capture with WAV resampling | ✅ shipped |
 | 5 | Integrations • advanced voice • full self-improvement loop • polish • deploy | planned |
 
 ## Repository layout

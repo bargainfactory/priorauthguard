@@ -1,14 +1,23 @@
 {
   "name": "pa-guard-web",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "PriorAuthGuard — Next.js 15 web frontend (light + dark, ROI dashboard, PrivacyFHEPanel).",
+  "description": "PriorAuthGuard — Next.js 15 web frontend + Tauri desktop + Capacitor mobile (light + dark, ROI dashboard, PrivacyFHEPanel, on-device Whisper).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "export": "BUILD_TARGET=native next build",
     "start": "next start",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:icon": "tauri icon",
+    "whisper:download": "bash scripts/download-whisper-model.sh small.en-q8_0",
+    "cap:sync": "BUILD_TARGET=native next build && cap sync",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android"
   },
   "dependencies": {
     "next": "15.0.3",
@@ -24,7 +33,12 @@
     "@radix-ui/react-progress": "1.1.0",
     "@radix-ui/react-separator": "1.1.0",
     "@radix-ui/react-label": "2.1.0",
-    "sonner": "1.7.0"
+    "sonner": "1.7.0",
+    "@tauri-apps/api": "2.0.3",
+    "@capacitor/core": "6.2.0",
+    "@capacitor/android": "6.2.0",
+    "@capacitor/ios": "6.2.0",
+    "@capacitor/splash-screen": "6.0.2"
   },
   "devDependencies": {
     "typescript": "5.6.3",
@@ -36,6 +50,8 @@
     "autoprefixer": "10.4.20",
     "tailwindcss-animate": "1.0.7",
     "eslint": "9.14.0",
-    "eslint-config-next": "15.0.3"
+    "eslint-config-next": "15.0.3",
+    "@tauri-apps/cli": "2.0.4",
+    "@capacitor/cli": "6.2.0"
   }
 }

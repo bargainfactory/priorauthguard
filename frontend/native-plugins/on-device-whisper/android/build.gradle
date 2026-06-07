@@ -1,0 +1,38 @@
+apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
+
+ext {
+    pa_guard_kotlin_version = "1.9.24"
+    pa_guard_min_sdk = 26
+    pa_guard_target_sdk = 34
+}
+
+android {
+    namespace "com.paguard.whisper"
+    compileSdk pa_guard_target_sdk
+    defaultConfig {
+        minSdk pa_guard_min_sdk
+        targetSdk pa_guard_target_sdk
+        consumerProguardFiles "consumer-rules.pro"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+        }
+    }
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "com.getcapacitor:capacitor:6.1.2"
+    // whisper.cpp JNI artifacts are produced by the CMake build below;
+    // there's no Maven dep here intentionally.
+    testImplementation "junit:junit:4.13.2"
+}

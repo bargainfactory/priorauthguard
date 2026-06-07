@@ -1,0 +1,7 @@
+# Cargo build outputs
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Tauri generated
+gen/schemas/

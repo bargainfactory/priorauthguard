@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PriorAuthGuard",
+  "version": "0.4.0",
+  "identifier": "com.priorauthguard.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "pnpm build && pnpm export",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PriorAuthGuard",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; connect-src 'self' ipc: http://127.0.0.1:8080 ws://127.0.0.1:8080"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Healthcare",
+    "shortDescription": "Privacy-first prior authorization desktop client.",
+    "longDescription": "PriorAuthGuard desktop wraps the web UI with native on-device Whisper transcription so clinician dictation audio never leaves the device.",
+    "copyright": "© 2026 PriorAuthGuard.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "externalBin": [],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "windows": {
+      "wix": { "language": "en-US" }
+    }
+  }
+}

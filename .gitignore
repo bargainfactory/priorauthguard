@@ -51,9 +51,13 @@ yarn-error.log*
 pnpm-debug.log*
 
 # --- Tauri / Capacitor (Phase 4) ---
+# Rust build artifacts.
 src-tauri/target/
-android/
-ios/
+# Capacitor `cap add ios|android` generates these inside `frontend/`. The
+# source-of-truth native plugin code lives under `native-plugins/`, which
+# we keep tracked — hence the anchored path.
+frontend/ios/
+frontend/android/
 
 # --- Editors / OS ---
 .idea/

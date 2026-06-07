@@ -1,0 +1,31 @@
+{
+  "name": "@pa-guard/on-device-whisper",
+  "version": "0.4.0",
+  "description": "Capacitor 6 plugin — on-device Whisper transcription for clinical dictation (iOS + Android).",
+  "main": "dist/plugin.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "scripts": {
+    "verify": "echo 'TODO: wire CocoaPods + Gradle verify here'",
+    "build": "echo 'TODO: tsc + rollup'"
+  },
+  "files": [
+    "dist/",
+    "ios/Sources/",
+    "android/src/",
+    "PaGuardOnDeviceWhisper.podspec"
+  ],
+  "author": "PriorAuthGuard Team",
+  "license": "Proprietary",
+  "peerDependencies": {
+    "@capacitor/core": "^6.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}
