@@ -31,7 +31,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -229,8 +229,27 @@ class PARunResponse(BaseModel):
     clarification_questions: list[str] = Field(default_factory=list)
 
 
+def _resolve_tenant(header: str | None, body_tenant: str) -> str:
+    """Tenant resolution rule:
+
+    - If `X-Tenant-Id` is present, it MUST match `meta.tenant_id`; mismatch
+      is a 403 to prevent cross-tenant smuggling via the header.
+    - If absent, `meta.tenant_id` (default "default") wins.
+    """
+    if header and header != body_tenant:
+        raise HTTPException(
+            status_code=403,
+            detail="X-Tenant-Id header does not match meta.tenant_id",
+        )
+    return body_tenant
+
+
 @app.post("/v1/pa", response_model=PARunResponse, tags=["pa"])
-async def run_pa(body: PARunRequest) -> PARunResponse:
+async def run_pa(
+    body: PARunRequest,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> PARunResponse:
+    tenant_id = _resolve_tenant(x_tenant_id, body.meta.tenant_id)
     supervisor: PASupervisor = app.state.supervisor
     final = await supervisor.run(note=body.note, meta=body.meta)
 
@@ -248,10 +267,11 @@ async def run_pa(body: PARunRequest) -> PARunResponse:
             final["clarification"].questions if final.get("clarification") else []
         ),
     )
-    # Persist via the Phase 5 async registry (in-memory or Postgres).
+    # Persist via the v1.0 GA async, tenant-scoped registry.
     if response.pa_request is not None:
         registry: PARegistry = app.state.pa_registry
         await registry.put(
+            tenant_id,
             response.pa_request.meta.request_id,
             response.model_dump(mode="json"),
         )
@@ -259,18 +279,26 @@ async def run_pa(body: PARunRequest) -> PARunResponse:
 
 
 @app.get("/v1/pa/{rid}", response_model=PARunResponse, tags=["pa"])
-async def get_pa(rid: UUID) -> PARunResponse:
+async def get_pa(
+    rid: UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> PARunResponse:
+    tenant_id = x_tenant_id or "default"
     registry: PARegistry = app.state.pa_registry
-    cached = await registry.get(rid)
+    cached = await registry.get(tenant_id, rid)
     if cached is None:
         raise HTTPException(status_code=404, detail=f"PA {rid} not found")
     return PARunResponse.model_validate(cached)
 
 
 @app.get("/v1/pa", response_model=list[PARunResponse], tags=["pa"])
-async def list_pa(limit: int = 50) -> list[PARunResponse]:
+async def list_pa(
+    limit: int = 50,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> list[PARunResponse]:
+    tenant_id = x_tenant_id or "default"
     registry: PARegistry = app.state.pa_registry
-    rows = await registry.list_recent(limit=limit)
+    rows = await registry.list_recent(tenant_id, limit=limit)
     return [PARunResponse.model_validate(r) for r in rows]
 
 

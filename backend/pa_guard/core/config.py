@@ -98,6 +98,15 @@ class Settings(BaseSettings):
     meta_improver_model: str = "claude-sonnet-4-6"
     meta_improver_max_tokens: int = 1024
 
+    # --- OPA / Rego policy overlay (v1.0 GA) ---
+    opa_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of an OPA server (e.g. http://opa:8181). When unset, the "
+            "OpaPolicyEngine is a no-op."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

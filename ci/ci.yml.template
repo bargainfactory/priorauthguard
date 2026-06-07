@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
@@ -10,6 +11,9 @@ permissions:
   contents: read
 
 jobs:
+  # -----------------------------------------------------------------------
+  # Backend — tests + lint on every PR.
+  # -----------------------------------------------------------------------
   backend:
     name: Backend (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -22,25 +26,16 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-
-      - name: Install
-        run: |
+      - run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Lint (ruff)
+          pip install -e ".[dev]" aiosqlite
+      - name: Lint
         run: ruff check pa_guard tests
-
-      - name: Type-check (mypy, non-blocking for Phase 0)
-        run: mypy pa_guard || true
-
       - name: Test
         env:
           PAG_ENVIRONMENT: test
@@ -62,8 +57,211 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Safe Harbor regression suite
+          pip install -e ".[dev]" aiosqlite
+      - name: Safe Harbor + FRI regression suite
         env:
           PAG_ENVIRONMENT: test
-        run: pytest -q -m compliance
+        run: pytest -q -m compliance tests/test_fri.py
+
+  # -----------------------------------------------------------------------
+  # Frontend (web build).
+  # -----------------------------------------------------------------------
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm type-check
+      - run: pnpm build
+
+  # -----------------------------------------------------------------------
+  # Docker image — built on every tag, multi-arch, cosign-signed (keyless).
+  # -----------------------------------------------------------------------
+  docker:
+    name: Docker (backend)
+    runs-on: ubuntu-latest
+    needs: [backend]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # for cosign keyless signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/backend
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=,suffix=,format=short
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: backend
+          file: backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign image (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for tag in $(echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n'); do
+            cosign sign --yes "$tag@${DIGEST}"
+          done
+
+  # -----------------------------------------------------------------------
+  # Tauri desktop bundles — Linux, macOS (x86_64 + arm64), Windows.
+  # -----------------------------------------------------------------------
+  tauri:
+    name: Tauri (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Tauri Linux deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: pnpm install --frozen-lockfile
+
+      # Import Apple Developer ID certificate (macOS signed builds).
+      - name: Import Apple signing cert
+        if: startsWith(matrix.os, 'macos')
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12_B64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          echo "$APPLE_CERT_P12" | base64 -d > cert.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
+      - name: Tauri build
+        env:
+          # macOS notarization (post-build).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            frontend/src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+
+  # -----------------------------------------------------------------------
+  # Capacitor Android signed APK.
+  # -----------------------------------------------------------------------
+  android:
+    name: Capacitor Android
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [frontend]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm cap:sync
+      - name: Decode Android keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/app/release.keystore
+      - name: Gradle assembleRelease
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: frontend/android
+        run: ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: frontend/android/app/build/outputs/apk/release/*.apk
+
+  # -----------------------------------------------------------------------
+  # GitHub release — publishes all signed binaries on a tag.
+  # -----------------------------------------------------------------------
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker, tauri, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*

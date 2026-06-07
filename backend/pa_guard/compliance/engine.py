@@ -1,5 +1,5 @@
 """ComplianceEngine — evaluate a PA request + document against the resolved
-rule pack for its jurisdiction.
+rule pack for its jurisdiction, layered with an optional OPA / Rego overlay.
 """
 from __future__ import annotations
 
@@ -10,13 +10,47 @@ from ..core.models import (
     PADocument,
     PARequest,
 )
+from .opa import OpaPolicyEngine
 from .rules import resolve_rules
 
 
 class ComplianceEngine:
-    """Stateless rule evaluator."""
+    """Stateless rule evaluator.
+
+    Built-in rule packs run first; if an `OpaPolicyEngine` is wired and
+    enabled, its findings are appended. A blocker from either layer marks
+    the audit as blocking.
+    """
+
+    def __init__(self, opa: OpaPolicyEngine | None = None) -> None:
+        self._opa = opa
 
     def audit(
+        self,
+        request: PARequest,
+        document: PADocument | None,
+    ) -> ComplianceAuditReport:
+        """Sync built-in audit (no OPA overlay). Kept stable for the
+        supervisor's existing call site so the LangGraph hot path stays sync."""
+        return self._evaluate_builtin(request, document)
+
+    async def audit_async(
+        self,
+        request: PARequest,
+        document: PADocument | None,
+    ) -> ComplianceAuditReport:
+        """Async audit that layers the OPA overlay on top of the built-ins."""
+        report = self._evaluate_builtin(request, document)
+        if self._opa is not None and self._opa.is_enabled:
+            overlay = await self._opa.evaluate(request, document)
+            merged = list(report.findings) + overlay
+            blocking = report.blocking or any(f.severity == "blocker" for f in overlay)
+            report = report.model_copy(update={"findings": merged, "blocking": blocking})
+        return report
+
+    # ------------------------------------------------------------------
+
+    def _evaluate_builtin(
         self,
         request: PARequest,
         document: PADocument | None,
@@ -32,8 +66,6 @@ class ComplianceEngine:
         for rule in resolution.all_rules():
             ok = rule.predicate(request, document)
             if rule.severity == "info":
-                # Info rules surface context regardless of predicate result —
-                # they are not "violations", they are "be aware".
                 findings.append(
                     ComplianceFinding(
                         rule_id=rule.rule_id,

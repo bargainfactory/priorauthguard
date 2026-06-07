@@ -22,6 +22,7 @@ PriorAuthGuard is a production-grade autonomous multi-agent system that takes a 
 | **3** | Next.js 15 web frontend (light + dark) • Dashboard • `PrivacyFHEPanel.tsx` reference component • Intake wizard • PA detail • Voice console • Meta-Improver review • zk-STARK verifier | ✅ shipped |
 | **4** | Tauri 2 desktop shell with real whisper-rs integration • Capacitor 6 mobile scaffold • custom `OnDeviceWhisper` plugin (iOS Swift + Android Kotlin + JNI/whisper.cpp) • unified platform-aware Whisper bridge • browser audio capture with WAV resampling | ✅ shipped |
 | **5** | Postgres-backed PA registry • payer adapter framework (Availity, CoverMyMeds, Surescripts, Fax, NHS Spine) with credential gates • WebSocket streaming voice • LLM-backed MetaImprover (Anthropic Claude + heuristic fallback) • backend Dockerfile + docker-compose + Helm chart with External Secrets | ✅ shipped |
+| **6 (v1.0 GA)** | Real FRI low-degree test in `ZkStarkProver` (Goldilocks + polynomial commitment + folding rounds + opening) • multi-tenant isolation (tenant_id everywhere) • OPA / Rego policy overlays • payer adapter conformance suite • multi-platform signed release pipeline (cosign + Apple notarization + Android keystore) | ✅ shipped |
 
 ## Repository layout
 

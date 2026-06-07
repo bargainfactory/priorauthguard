@@ -200,6 +200,16 @@ class PARequestMeta(_StrictModel):
     procedure_code: str = Field(description="CPT/HCPCS/ICD-10 procedure code.")
     diagnosis_codes: list[str] = Field(default_factory=list)
     urgency: Literal["routine", "urgent", "emergent"] = "routine"
+    tenant_id: str = Field(
+        default="default",
+        description=(
+            "Multi-tenant isolation key. The PA is invisible to other tenants. "
+            "Operator-set; never derived from PHI."
+        ),
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_.-]+$",
+    )
 
 
 class PARequest(_StrictModel):
