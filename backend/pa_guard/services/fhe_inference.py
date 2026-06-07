@@ -146,9 +146,22 @@ class FHEInferenceService:
             output_type="score",
             model_commitment=_commit_to_circuit("denial_risk_v0"),
         )
+        # Auto-load the compiled Concrete ML circuit when one exists in the
+        # cache dir AND the SDK is importable. Production rollouts run
+        # `python -m pa_guard.scripts.train_circuits` once to materialize it.
+        from .fhe_pipeline import maybe_load_compiled_circuit
+
+        compiled_bundle = maybe_load_compiled_circuit(
+            denial_risk.name, self._settings
+        )
+        handle: object | None = None
+        if compiled_bundle is not None:
+            handle = compiled_bundle.get("compiled")
+
         self._registry[denial_risk.name] = _CompiledCircuit(
             spec=denial_risk,
             artifact_path=self._settings.fhe_cache_dir / denial_risk.name,
+            handle=handle,
         )
         self._log.info(
             "fhe_circuit_registered",
@@ -156,6 +169,7 @@ class FHEInferenceService:
             quant_bits=denial_risk.quant_bits,
             use_qat=denial_risk.use_qat,
             fhe_enabled=self._settings.fhe_enabled,
+            fhe_handle_loaded=handle is not None,
         )
 
     def list_circuits(self) -> list[CircuitSpec]:
@@ -223,15 +237,36 @@ class FHEInferenceService:
         circuit: _CompiledCircuit,
         req: FHEInferenceRequest,
     ) -> float:
-        """Run the compiled Concrete ML circuit.
+        """Run the compiled Concrete ML circuit and return the measured latency.
 
-        Phase 0 returns a synthetic small latency so downstream consumers can
-        exercise the metrics path. Phase 2 replaces this with an actual
-        `circuit.handle.run(ciphertext)` call (`concrete.ml.deployment.FHEModelServer`).
+        When the SDK is installed AND a compiled handle is loaded, this
+        actually invokes `circuit.handle.run(ct)`. When only the handle path
+        is missing (e.g., the SDK is present but the circuit hasn't been
+        compiled yet) we record a marker latency so OutcomeLogger can flag
+        the gap. PHI never enters this call — the input has already been
+        de-identified, the FHE client has already encrypted it.
         """
-        await asyncio.sleep(0)  # yield to the event loop
-        synthetic_latency = 12.5  # ms — placeholder until the real circuit lands
-        return synthetic_latency
+        await asyncio.sleep(0)
+        if circuit.handle is None:
+            return 12.5  # marker latency — circuit not compiled yet
+
+        from .fhe_pipeline import _featurize  # local import to avoid cycle
+
+        t0 = time.perf_counter()
+        try:
+            vector = _featurize(req.features)
+            import numpy as np
+
+            x = np.array([vector], dtype="float32")
+            # `compile_brevitas_qat_model` exposes `forward(x)` that performs
+            # encrypt → run → decrypt as a single client-side call. In a real
+            # deployment the client encrypts and the server only calls
+            # `.run(ciphertext)`. The split is configurable per deployment.
+            _ = circuit.handle.forward(x)  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover — guarded production path
+            self._log.error("fhe_run_failed", error=str(exc))
+            raise
+        return (time.perf_counter() - t0) * 1000
 
     # ------------------------------------------------------------------
     # Validation
@@ -264,12 +299,22 @@ class FHEInferenceService:
 # ---------------------------------------------------------------------------
 
 def _commit_to_circuit(name: str) -> str:
-    """Stable commitment hash for a circuit (placeholder until Phase 2).
+    """Stable commitment hash for a circuit.
 
-    Phase 2 hashes the actual compiled-model bytes; Phase 0 hashes the name so
-    the contract / proof bookkeeping path can be exercised end-to-end.
+    When a compiled artifact is present in the cache dir, hashes the artifact
+    bytes (a true cryptographic commitment to the deployed model). When the
+    artifact is absent, falls back to a name-derived placeholder so the
+    contract path stays exercisable end-to-end without the FHE SDK installed.
     """
-    return hashlib.sha256(f"phase0::{name}".encode()).hexdigest()
+    s = get_settings()
+    artifact = s.fhe_cache_dir / f"{name}.compiled"
+    if artifact.exists():
+        h = hashlib.sha256()
+        with artifact.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    return hashlib.sha256(f"stub::{name}".encode()).hexdigest()
 
 
 __all__ = ["CircuitSpec", "FHEInferenceService"]

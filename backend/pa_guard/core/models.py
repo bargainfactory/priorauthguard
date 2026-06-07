@@ -14,12 +14,20 @@ Conventions
 """
 from __future__ import annotations
 
+import base64
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_serializer,
+    field_validator,
+)
 
 from .config import Jurisdiction
 
@@ -262,10 +270,27 @@ class ZkStarkProof(_StrictModel):
     )
     input_hash: str = Field(description="Hash of the encrypted (or de-id) input.")
     output_hash: str = Field(description="Hash of the public output.")
+    # Bytes in Python; base64 on the JSON wire. Plain `bytes` would try to
+    # UTF-8 decode the proof bytes in `mode="json"` and fail; `Base64Bytes`
+    # would reject raw bytes on construction. The pair of (validator,
+    # serializer) below threads the needle cleanly.
     proof_blob: bytes = Field(
         description="Raw proof payload. Verifier consumes this opaquely.",
     )
     created_at: datetime = Field(default_factory=_utcnow)
+
+    @field_validator("proof_blob", mode="before")
+    @classmethod
+    def _decode_b64_if_str(cls, v: object) -> bytes:
+        if isinstance(v, bytes):
+            return v
+        if isinstance(v, str):
+            return base64.b64decode(v)
+        raise TypeError(f"proof_blob must be bytes or base64 str, got {type(v).__name__}")
+
+    @field_serializer("proof_blob", when_used="json")
+    def _encode_b64(self, v: bytes) -> str:
+        return base64.b64encode(v).decode("ascii")
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +461,62 @@ class IntakeClarificationRequest(_StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# Meta-improvement
+# ---------------------------------------------------------------------------
+
+class ImprovementCategory(StrEnum):
+    PROMPT = "prompt"
+    RAG = "rag"
+    WORKFLOW = "workflow"
+    SCRIPT = "script"
+    RULE = "rule"
+    CIRCUIT = "circuit"
+
+
+class ImprovementProposalStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    APPLIED = "applied"
+
+
+class ImprovementProposal(_StrictModel):
+    """A concrete change suggested by `MetaImproverAgent`, gated on human approval."""
+
+    proposal_id: UUID = Field(default_factory=uuid4)
+    category: ImprovementCategory
+    target: str = Field(description="Agent / circuit / RAG key the change applies to.")
+    title: str
+    rationale: str = Field(description="Why the system thinks this would help.")
+    supporting_metrics: dict[str, float] = Field(default_factory=dict)
+    confidence: float = Field(ge=0.0, le=1.0)
+    proposed_change: dict[str, str | float | int | list[str]] = Field(
+        default_factory=dict,
+        description="The actual config / prompt / rule patch the supervisor would apply on approval.",
+    )
+    status: ImprovementProposalStatus = ImprovementProposalStatus.PROPOSED
+    created_at: datetime = Field(default_factory=_utcnow)
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+
+
+class OutcomeAggregate(_StrictModel):
+    """Roll-up statistics computed by `OutcomeLogger.aggregate()`."""
+
+    window_seconds: int = Field(ge=0, description="0 means all-time.")
+    sample_count: int
+    by_agent_avg_latency_ms: dict[str, float] = Field(default_factory=dict)
+    by_agent_success_rate: dict[str, float] = Field(default_factory=dict)
+    denial_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    appeal_success_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    fhe_executed_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    avg_fhe_latency_ms: float | None = None
+    avg_voice_call_duration_seconds: float | None = None
+    raw_audio_left_device_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    computed_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Self-critique / OutcomeLogger payloads
 # ---------------------------------------------------------------------------
 
@@ -465,8 +546,12 @@ __all__ = [
     "DenialReport",
     "FHEInferenceRequest",
     "FHEInferenceResult",
+    "ImprovementCategory",
+    "ImprovementProposal",
+    "ImprovementProposalStatus",
     "IntakeClarificationRequest",
     "JurisdictionTag",
+    "OutcomeAggregate",
     "PADocument",
     "PARequest",
     "PARequestMeta",

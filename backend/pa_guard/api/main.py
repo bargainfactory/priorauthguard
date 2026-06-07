@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agents.denial_appeal import AppealInput, DenialAppealAgent
+from ..agents.meta_improver import MetaImproverAgent
 from ..agents.privacy_guardian import IntakePayload, PrivacyGuardianAgent
 from ..agents.supervisor import PASupervisor, SupervisorConfig
 from ..core.config import get_settings
@@ -46,14 +47,19 @@ from ..core.models import (
     DenialReport,
     FHEInferenceRequest,
     FHEInferenceResult,
+    ImprovementProposal,
+    ImprovementProposalStatus,
+    OutcomeAggregate,
     PADocument,
     PARequest,
     PARequestMeta,
     PolicyEvidence,
     RawClinicalNote,
     SubmissionReceipt,
+    ZkStarkProof,
 )
 from ..services.fhe_inference import FHEInferenceService
+from ..services.zkstark import ZkStarkVerifier
 
 
 @asynccontextmanager
@@ -73,8 +79,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.fhe = FHEInferenceService(settings=settings)
     app.state.supervisor = PASupervisor(config=SupervisorConfig())
     app.state.appealer = DenialAppealAgent()
-    # In-memory PA registry (Phase 1). Phase 2 swaps this for Postgres.
+    app.state.meta_improver = MetaImproverAgent()
+    app.state.zk_verifier = ZkStarkVerifier(settings=settings)
+    # In-memory registries (Phase 2). Phase 5 promotes these to Postgres.
     app.state.pa_registry = {}
+    app.state.proposals_registry = {}
     yield
     log.info("api_shutdown")
 
@@ -171,6 +180,8 @@ class PARunResponse(BaseModel):
     document: PADocument | None = None
     audit: ComplianceAuditReport | None = None
     receipt: SubmissionReceipt | None = None
+    risk_score: FHEInferenceResult | None = None
+    proof_id: str | None = None
     needs_human_approval: bool = False
     clarification_questions: list[str] = Field(default_factory=list)
 
@@ -187,6 +198,8 @@ async def run_pa(body: PARunRequest) -> PARunResponse:
         document=final.get("document"),
         audit=final.get("audit"),
         receipt=final.get("receipt"),
+        risk_score=final.get("risk_score"),
+        proof_id=final.get("proof_id"),
         needs_human_approval=final.get("needs_human_approval", False),
         clarification_questions=(
             final["clarification"].questions if final.get("clarification") else []
@@ -279,3 +292,85 @@ async def voice_dictation(body: DictationRequest) -> DictationResponse:
         cleaned_text=result.cleaned_text,
         identifiers_redacted=sum(result.deid_report.identifier_counts.values()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — outcomes + meta-improvement + zk verification
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/outcomes/aggregate", response_model=OutcomeAggregate, tags=["outcomes"])
+async def outcomes_aggregate(window_seconds: int = 0) -> OutcomeAggregate:
+    supervisor: PASupervisor = app.state.supervisor
+    return await supervisor.outcome_logger.aggregate(window_seconds=window_seconds)
+
+
+@app.post(
+    "/v1/meta-improver/proposals",
+    response_model=list[ImprovementProposal],
+    tags=["meta-improver"],
+)
+async def meta_improver_propose(window_seconds: int = 0) -> list[ImprovementProposal]:
+    """Run MetaImproverAgent on the current outcome aggregate and persist proposals."""
+    supervisor: PASupervisor = app.state.supervisor
+    meta: MetaImproverAgent = app.state.meta_improver
+    agg = await supervisor.outcome_logger.aggregate(window_seconds=window_seconds)
+    proposals = meta.propose(agg)
+    for p in proposals:
+        app.state.proposals_registry[str(p.proposal_id)] = p
+    return proposals
+
+
+@app.get(
+    "/v1/meta-improver/proposals",
+    response_model=list[ImprovementProposal],
+    tags=["meta-improver"],
+)
+async def meta_improver_list() -> list[ImprovementProposal]:
+    return list(app.state.proposals_registry.values())
+
+
+class ProposalDecisionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approve: bool
+    approved_by: str
+
+
+@app.post(
+    "/v1/meta-improver/proposals/{proposal_id}/decide",
+    response_model=ImprovementProposal,
+    tags=["meta-improver"],
+)
+async def meta_improver_decide(
+    proposal_id: UUID, body: ProposalDecisionBody
+) -> ImprovementProposal:
+    proposal = app.state.proposals_registry.get(str(proposal_id))
+    if proposal is None:
+        raise HTTPException(status_code=404, detail=f"Proposal {proposal_id} not found")
+    from datetime import UTC, datetime
+
+    updated = proposal.model_copy(
+        update={
+            "status": (
+                ImprovementProposalStatus.APPROVED
+                if body.approve
+                else ImprovementProposalStatus.REJECTED
+            ),
+            "approved_by": body.approved_by if body.approve else None,
+            "approved_at": datetime.now(UTC) if body.approve else None,
+        }
+    )
+    app.state.proposals_registry[str(proposal_id)] = updated
+    return updated
+
+
+class ZkVerifyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    valid: bool
+
+
+@app.post("/v1/zkstark/verify", response_model=ZkVerifyResponse, tags=["zkstark"])
+async def zkstark_verify(proof: ZkStarkProof) -> ZkVerifyResponse:
+    verifier: ZkStarkVerifier = app.state.zk_verifier
+    return ZkVerifyResponse(valid=await verifier.verify(proof))

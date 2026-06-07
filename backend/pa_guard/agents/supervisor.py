@@ -45,6 +45,8 @@ from ..core.models import (
     AppealDocument,
     ComplianceAuditReport,
     DenialReport,
+    FHEInferenceRequest,
+    FHEInferenceResult,
     IntakeClarificationRequest,
     PADocument,
     PARequest,
@@ -55,6 +57,8 @@ from ..core.models import (
     SubmissionChannel,
     SubmissionReceipt,
 )
+from ..services.fhe_inference import FHEInferenceService
+from ..services.zkstark import StatementInputs, ZkStarkProver
 from .compliance_auditor import AuditInput, ComplianceAuditorAgent
 from .denial_appeal import AppealInput, DenialAppealAgent
 from .document_generator import DocumentGenerationInput, DocumentGeneratorAgent
@@ -83,6 +87,8 @@ class PAState(TypedDict, total=False):
     needs_human_approval: bool
     human_approved: bool
     errors: list[str]
+    risk_score: FHEInferenceResult | None     # Phase 2: FHE denial-risk score
+    proof_id: str | None                       # Phase 2: zk-STARK proof for the run
 
 
 # ---------------------------------------------------------------------------
@@ -115,10 +121,24 @@ class PASupervisor:
     submission: SubmissionAgent = field(default_factory=SubmissionAgent)
     denial_appeal: DenialAppealAgent = field(default_factory=DenialAppealAgent)
     outcome_logger: OutcomeLogger = field(default_factory=OutcomeLogger)
+    fhe: FHEInferenceService = field(default_factory=FHEInferenceService)
+    prover: ZkStarkProver = field(default_factory=ZkStarkProver)
     config: SupervisorConfig = field(default_factory=SupervisorConfig)
 
     def __post_init__(self) -> None:
         self._log = get_logger("PASupervisor")
+        # Wire every agent's self-critiques into the OutcomeLogger so the
+        # MetaImproverAgent can aggregate them later.
+        for agent in (
+            self.privacy_guardian,
+            self.intake,
+            self.policy_researcher,
+            self.document_generator,
+            self.auditor,
+            self.submission,
+            self.denial_appeal,
+        ):
+            agent.attach_critique_sink(self.outcome_logger.log_critique)
 
     # ------------------------------------------------------------------
     # Graph construction
@@ -223,6 +243,49 @@ class PASupervisor:
         return state
 
     async def _node_submission(self, state: PAState) -> PAState:
+        # FHE risk score on de-identified pipeline features before submission.
+        urgency = state["raw_meta"].urgency
+        fhe_req = FHEInferenceRequest(
+            circuit_name="denial_risk_v0",
+            features={
+                "urgency": urgency,
+                "prior_denials": 0.0,
+                "missing_docs_count": float(
+                    sum(
+                        1 for c in state["document"].criteria
+                        if str(c.status).endswith("unknown")
+                    )
+                ),
+            },
+        )
+        risk = await self.fhe.infer(fhe_req)
+        await self.outcome_logger.log_fhe(risk)
+
+        # zk-STARK proof binding (model_commitment, input_hash, document_hash).
+        from blake3 import blake3
+
+        input_hash = blake3(
+            (
+                state["pa_request"].safe_context.cleaned_text
+                + "|"
+                + str(state["pa_request"].meta.request_id)
+            ).encode()
+        ).hexdigest()
+        output_hash = blake3(
+            (
+                str(state["document"].document_id)
+                + "|"
+                + state["document"].medical_necessity_narrative
+            ).encode()
+        ).hexdigest()
+        proof = await self.prover.prove(
+            StatementInputs(
+                model_commitment="denial_risk_v0",
+                input_hash=input_hash,
+                output_hash=output_hash,
+            )
+        )
+
         receipt = await self.submission.run(
             request_id=state["pa_request"].meta.request_id,
             payload=SubmissionInput(
@@ -231,7 +294,13 @@ class PASupervisor:
             ),
         )
         await self.outcome_logger.log_submission(receipt)
-        return {**state, "receipt": receipt, "status": PAStatus.SUBMITTED.value}
+        return {
+            **state,
+            "receipt": receipt,
+            "risk_score": risk,
+            "proof_id": str(proof.proof_id),
+            "status": PAStatus.SUBMITTED.value,
+        }
 
     async def _node_appeal(self, state: PAState) -> PAState:
         denial = state["denial"]

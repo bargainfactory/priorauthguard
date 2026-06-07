@@ -182,6 +182,66 @@ US_STATE_RULES: Final[dict[str, tuple[Rule, ...]]] = {
              "Subject to NY S.3400-A PA modernization disclosures.",
              _ny_pa_modernization),
     ),
+    "FL": (
+        Rule("US-FL-001", "info",
+             "Florida HB 459 PA response-time requirements apply.",
+             lambda r, d: True),
+    ),
+    "IL": (
+        Rule("US-IL-001", "info",
+             "Illinois HB 711 standard PA decision within 5 business days.",
+             lambda r, d: True),
+    ),
+    "PA": (
+        Rule("US-PA-001", "info",
+             "Pennsylvania Act 146 PA timeline / disclosure requirements apply.",
+             lambda r, d: True),
+    ),
+    "OH": (
+        Rule("US-OH-001", "info",
+             "Ohio HB 47 step-therapy override pathway.",
+             lambda r, d: True),
+    ),
+    "MI": (
+        Rule("US-MI-001", "info",
+             "Michigan PA 60 step-therapy override + timeline rules apply.",
+             lambda r, d: True),
+    ),
+    "WA": (
+        Rule("US-WA-001", "info",
+             "Washington RCW 48.43.420 PA timeline requirements apply.",
+             lambda r, d: True),
+    ),
+    "GA": (
+        Rule("US-GA-001", "info",
+             "Georgia SB 3 PA timeline + step-therapy override apply.",
+             lambda r, d: True),
+    ),
+    "MA": (
+        Rule("US-MA-001", "info",
+             "Massachusetts 211 CMR 52 PA standards apply.",
+             lambda r, d: True),
+    ),
+    "NC": (
+        Rule("US-NC-001", "info",
+             "North Carolina SB 105 PA timeline rules apply.",
+             lambda r, d: True),
+    ),
+    "VA": (
+        Rule("US-VA-001", "info",
+             "Virginia Code §38.2-3407.15 PA timeline rules apply.",
+             lambda r, d: True),
+    ),
+    "CO": (
+        Rule("US-CO-001", "info",
+             "Colorado HB 22-1370 PA reform requirements apply.",
+             lambda r, d: True),
+    ),
+    "NJ": (
+        Rule("US-NJ-001", "info",
+             "New Jersey P.L.2021 c.131 PA standards apply.",
+             lambda r, d: True),
+    ),
 }
 
 
@@ -219,6 +279,56 @@ CA_PROVINCE_RULES: Final[dict[str, tuple[Rule, ...]]] = {
     "BC": (
         Rule("CA-BC-001", "info",
              "BC PIPA + PHIA obligations apply; data residency preference.",
+             lambda r, d: True),
+    ),
+    "AB": (
+        Rule("CA-AB-001", "info",
+             "Alberta HIA + PIPEDA agent-of-the-custodian obligations apply.",
+             lambda r, d: True),
+    ),
+    "MB": (
+        Rule("CA-MB-001", "info",
+             "Manitoba PHIA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "NB": (
+        Rule("CA-NB-001", "info",
+             "New Brunswick PHIPAA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "NL": (
+        Rule("CA-NL-001", "info",
+             "Newfoundland & Labrador PHIA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "NS": (
+        Rule("CA-NS-001", "info",
+             "Nova Scotia PHIA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "PE": (
+        Rule("CA-PE-001", "info",
+             "PEI HIA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "SK": (
+        Rule("CA-SK-001", "info",
+             "Saskatchewan HIPA + PIPEDA apply.",
+             lambda r, d: True),
+    ),
+    "NT": (
+        Rule("CA-NT-001", "info",
+             "Northwest Territories — PIPEDA + NWT Health Information Act apply.",
+             lambda r, d: True),
+    ),
+    "NU": (
+        Rule("CA-NU-001", "info",
+             "Nunavut — PIPEDA applies.",
+             lambda r, d: True),
+    ),
+    "YT": (
+        Rule("CA-YT-001", "info",
+             "Yukon HIPMA + PIPEDA apply.",
              lambda r, d: True),
     ),
 }
