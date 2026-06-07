@@ -1,0 +1,91 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+.installed.cfg
+MANIFEST
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# --- Node / Next.js (Phase 3+) ---
+node_modules/
+.next/
+out/
+.turbo/
+.pnp.*
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Tauri / Capacitor (Phase 4) ---
+src-tauri/target/
+android/
+ios/
+
+# --- Editors / OS ---
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# --- FHE artifacts (compiled circuits can be large) ---
+backend/.fhe_cache/
+backend/.zkstark_cache/
+*.fhe
+*.zkp
+
+# --- Local data & models (never commit PHI) ---
+backend/data/
+backend/models/
+*.bin
+*.gguf
+*.onnx
+
+# --- Logs ---
+logs/
+*.log
