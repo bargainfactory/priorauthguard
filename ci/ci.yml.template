@@ -117,7 +117,7 @@ jobs:
           uvicorn pa_guard.api.main:app --host 127.0.0.1 --port 8080 &
           echo $! > .pid
           for i in {1..30}; do
-            curl -sf http://127.0.0.1:8080/readyz && break || sleep 1
+            curl -sf http://127.0.0.1:8088/readyz && break || sleep 1
           done
       - uses: pnpm/action-setup@v4
         with: { version: 9 }
@@ -134,7 +134,7 @@ jobs:
       - name: Run E2E
         working-directory: frontend
         env:
-          PAG_BACKEND_URL: http://127.0.0.1:8080
+          PAG_BACKEND_URL: http://127.0.0.1:8088
         run: pnpm e2e
       - if: failure()
         uses: actions/upload-artifact@v4

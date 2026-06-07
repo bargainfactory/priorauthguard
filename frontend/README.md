@@ -30,7 +30,7 @@ uvicorn pa_guard.api.main:app --reload
 ```
 
 The Next dev server proxies `/api/*` to the FastAPI backend (configurable via
-`NEXT_PUBLIC_BACKEND_URL`; defaults to `http://127.0.0.1:8080`).
+`NEXT_PUBLIC_BACKEND_URL`; defaults to `http://127.0.0.1:8088`).
 
 ## Design notes
 

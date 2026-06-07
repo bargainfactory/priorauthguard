@@ -14,7 +14,7 @@ scrape_configs:
     params:
       window_seconds: ['0']
     static_configs:
-      - targets: ['backend:8080']
+      - targets: ['backend:8088']
     metric_relabel_configs:
       # JSON shape from /v1/slo/snapshot isn't strictly Prometheus — the
       # `slo-bridge` sidecar (deploy/observability/slo-bridge) reformats it

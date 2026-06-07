@@ -36,14 +36,14 @@ services:
     environment:
       PAG_ENVIRONMENT: development
       PAG_API_HOST: 0.0.0.0
-      PAG_API_PORT: "8080"
+      PAG_API_PORT: "8088"
       PAG_DATABASE_URL: postgresql+asyncpg://paguard:paguard_dev_only@db:5432/paguard
       PAG_PA_REGISTRY_BACKEND: sql
       PAG_FHE_ENABLED: "false"
       PAG_ZKSTARK_ENABLED: "false"
       # Provide real payer + LLM credentials via an .env file in production.
     ports:
-      - "8080:8080"
+      - "8088:8088"
 
   pgadmin:
     profiles: ["debug"]

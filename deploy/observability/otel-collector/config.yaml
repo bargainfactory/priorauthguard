@@ -20,7 +20,7 @@ receivers:
         - job_name: pa-guard-backend
           scrape_interval: 15s
           static_configs:
-            - targets: ['backend:8080']
+            - targets: ['backend:8088']
 
 processors:
   batch:

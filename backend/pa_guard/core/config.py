@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # --- API ---
     api_host: str = "127.0.0.1"
-    api_port: int = 8080
+    api_port: int = 8088
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
     # --- Privacy / FHE ---

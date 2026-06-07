@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * The test runner boots the Next.js dev server itself (so CI doesn't need
  * a separate process). The backend is expected to be reachable at
- * `PAG_BACKEND_URL` (default `http://127.0.0.1:8080`). The
+ * `PAG_BACKEND_URL` (default `http://127.0.0.1:8088`). The
  * `backend-ready` global setup in `tests-e2e/helpers/backend-ready.ts`
  * polls `/readyz` so flaky races during `pytest` warm-up don't fail
  * the suite.
@@ -37,7 +37,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     env: {
       // Proxy /api/* to the local backend in dev / E2E.
-      NEXT_PUBLIC_BACKEND_URL: process.env.PAG_BACKEND_URL ?? "http://127.0.0.1:8080",
+      NEXT_PUBLIC_BACKEND_URL: process.env.PAG_BACKEND_URL ?? "http://127.0.0.1:8088",
     },
   },
 });

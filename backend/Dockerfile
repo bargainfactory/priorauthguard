@@ -41,7 +41,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
     PAG_ENVIRONMENT=production \
     PAG_API_HOST=0.0.0.0 \
-    PAG_API_PORT=8080
+    PAG_API_PORT=8088
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl tini \
@@ -56,10 +56,10 @@ WORKDIR /app
 COPY pa_guard ./pa_guard
 
 USER paguard
-EXPOSE 8080
+EXPOSE 8088
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PAG_API_PORT}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "pa_guard.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "pa_guard.api.main:app", "--host", "0.0.0.0", "--port", "8088"]
