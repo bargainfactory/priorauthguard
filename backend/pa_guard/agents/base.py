@@ -49,27 +49,48 @@ class BaseAgent(ABC, Generic[TIn, TOut]):
     # ------------------------------------------------------------------
 
     async def run(self, request_id: UUID, payload: TIn) -> TOut:
+        from ..core.otel import get_tracer
+
+        tracer = get_tracer()
+        # When OTel is disabled, use a null context manager so the lifecycle
+        # stays identical and we avoid any per-call branching cost.
+        if tracer is not None:
+            cm = tracer.start_as_current_span(f"agent.{self.name}")
+        else:
+            from contextlib import nullcontext
+
+            cm = nullcontext(None)
+
         start = time.perf_counter()
         ok = True
         result: TOut
-        try:
-            result = await self._run(payload)
-            return result
-        except Exception as exc:
-            ok = False
-            self._log.error("agent_failed", error=str(exc), request_id=str(request_id))
-            raise
-        finally:
-            if self.emits_critique:
+        with cm as span:
+            if span is not None:
+                span.set_attribute("pa_guard.agent.name", self.name)
+                span.set_attribute("pa_guard.request_id", str(request_id))
+            try:
+                result = await self._run(payload)
+                return result
+            except Exception as exc:
+                ok = False
+                if span is not None:
+                    span.record_exception(exc)
+                self._log.error("agent_failed", error=str(exc), request_id=str(request_id))
+                raise
+            finally:
                 latency_ms = (time.perf_counter() - start) * 1000
-                critique = self._build_critique(
-                    request_id=request_id,
-                    latency_ms=latency_ms,
-                    ok=ok,
-                    payload=payload,
-                    result=locals().get("result"),
-                )
-                await self._emit_critique(critique)
+                if self.emits_critique:
+                    critique = self._build_critique(
+                        request_id=request_id,
+                        latency_ms=latency_ms,
+                        ok=ok,
+                        payload=payload,
+                        result=locals().get("result"),
+                    )
+                    if span is not None:
+                        for k, v in critique.kpi.items():
+                            span.set_attribute(f"pa_guard.kpi.{k}", v)
+                    await self._emit_critique(critique)
 
     def attach_critique_sink(
         self, sink: Callable[[AgentCritique], Awaitable[None]]

@@ -22,6 +22,11 @@ class CoverMyMedsAdapter:
         if not api_key:
             raise RuntimeError("CoverMyMeds credentials missing")
         self._api_key = api_key
+        self._base_url = (
+            getattr(self.settings, "covermymeds_base_url", None)
+            or "https://api.covermymeds.com"
+        ).rstrip("/")
+        self._sandbox = bool(getattr(self.settings, "payer_sandbox_mode", False))
         self._log = get_logger("CoverMyMedsAdapter")
 
     async def submit(self, document: PADocument) -> SubmissionReceipt:
@@ -46,7 +51,7 @@ class CoverMyMedsAdapter:
         }
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(
-                "https://api.covermymeds.com/v2/prior_authorizations",
+                f"{self._base_url}/v2/prior_authorizations",
                 headers={
                     "authorization": f"Bearer {self._api_key}",
                     "content-type": "application/json",
@@ -59,6 +64,8 @@ class CoverMyMedsAdapter:
             "covermymeds_accepted",
             payer=document.payer_id,
             confirmation=out.get("token"),
+            sandbox=self._sandbox,
+            base_url=self._base_url,
         )
         return SubmissionReceipt(
             request_id=document.request_id,

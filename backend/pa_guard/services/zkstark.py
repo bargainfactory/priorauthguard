@@ -59,6 +59,7 @@ from typing import Final
 from ..core.config import Settings, get_settings
 from ..core.logging import get_logger
 from ..core.models import ZkStarkProof
+from . import zkstark_native
 
 # ---------------------------------------------------------------------------
 # Field — Goldilocks p = 2^64 − 2^32 + 1
@@ -223,9 +224,18 @@ def poly_eval(coeffs: list[int], x: int) -> int:
     return acc
 
 
-def poly_eval_domain(coeffs: list[int], omega: int, N: int) -> list[int]:
+def _poly_eval_domain_py(coeffs: list[int], omega: int, N: int) -> list[int]:
     # Naive DFT — fine at N ≤ 64.
     return [poly_eval(coeffs, fpow(omega, i)) for i in range(N)]
+
+
+# Bind to the native implementation when the Rust extension is installed;
+# otherwise fall back to the pure-Python loop above. Same signature, same
+# semantics — callers pay no overhead either way.
+if zkstark_native.HAS_NATIVE:
+    poly_eval_domain = zkstark_native.poly_eval_domain  # type: ignore[assignment]
+else:
+    poly_eval_domain = _poly_eval_domain_py
 
 
 def lagrange_interpolate(xs: list[int], ys: list[int]) -> list[int]:
@@ -268,7 +278,14 @@ def _poly_mul(a: list[int], b: list[int]) -> list[int]:
 _TRACE_DEGREE: Final[int] = 4          # private polynomial degree < 4
 _BLOWUP_FACTOR: Final[int] = 4         # Reed-Solomon code rate 1/4
 _DOMAIN_SIZE: Final[int] = _TRACE_DEGREE * _BLOWUP_FACTOR
-_N_QUERIES: Final[int] = 4
+
+# 25 queries → ~128-bit conjectured security in the random-oracle model.
+# With domain size N=16, log₂(N)=4 layers × 25 queries = 100 Merkle openings
+# per proof. The pure-Python prover stays under ~50ms per call; native
+# acceleration via `zkstark_native` (Rust + PyO3, see ../../native/) drops
+# that under 5ms when the wheel is installed.
+_N_QUERIES: Final[int] = 25
+
 _PUBLIC_POINTS: Final[tuple[int, ...]] = (0, 1, 2)
 
 assert (P - 1) % _DOMAIN_SIZE == 0
@@ -404,7 +421,7 @@ def _read_path(blob: bytes, i: int) -> tuple[MerkleAuthPath, int]:
 # Folding
 # ---------------------------------------------------------------------------
 
-def _fri_fold(layer: list[int], omega: int, alpha: int) -> list[int]:
+def _fri_fold_py(layer: list[int], omega: int, alpha: int) -> list[int]:
     """f'(X²) = f_even(X²) + α·f_odd(X²).
 
     Given evaluations of f on a coset of order N, returns evaluations of f'
@@ -422,6 +439,9 @@ def _fri_fold(layer: list[int], omega: int, alpha: int) -> list[int]:
         f_odd = fmul(fsub(f_lo, f_hi), fmul(inv_two, fpow(omega_inv, i)))
         out[i] = fadd(f_even, fmul(alpha, f_odd))
     return out
+
+
+_fri_fold = zkstark_native.fri_fold if zkstark_native.HAS_NATIVE else _fri_fold_py  # type: ignore[assignment]
 
 
 def _absorb_statement(t: Transcript, stmt: StatementInputs) -> None:

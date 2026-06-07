@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TenantProvider } from "@/lib/tenant";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,8 +34,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
-          <Toaster position="top-right" richColors closeButton />
+          <TenantProvider>
+            {children}
+            <Toaster position="top-right" richColors closeButton />
+          </TenantProvider>
         </ThemeProvider>
       </body>
     </html>

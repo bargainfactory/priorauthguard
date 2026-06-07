@@ -59,6 +59,7 @@ from ..core.models import (
     SubmissionReceipt,
     ZkStarkProof,
 )
+from ..core.otel import configure_otel
 from ..payers.registry import PayerAdapterRegistry
 from ..services.fhe_inference import FHEInferenceService
 from ..services.zkstark import ZkStarkVerifier
@@ -71,6 +72,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     log = get_logger("api")
     settings = get_settings()
+    # OpenTelemetry — no-op when PAG_OTEL_ENABLED is false.
+    configure_otel(app=app, settings=settings)
     log.info(
         "api_startup",
         env=settings.environment,

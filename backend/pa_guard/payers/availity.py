@@ -36,6 +36,11 @@ class AvailityAdapter:
             raise RuntimeError("Availity credentials missing")
         self._client_id = client_id
         self._client_secret = client_secret
+        self._base_url = (
+            getattr(self.settings, "availity_base_url", None)
+            or "https://api.availity.com"
+        ).rstrip("/")
+        self._sandbox = bool(getattr(self.settings, "payer_sandbox_mode", False))
         self._log = get_logger("AvailityAdapter")
 
     async def submit(self, document: PADocument) -> SubmissionReceipt:
@@ -47,7 +52,7 @@ class AvailityAdapter:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(
-                "https://api.availity.com/availity/v1/coverages/prior-authorizations",
+                f"{self._base_url}/availity/v1/coverages/prior-authorizations",
                 headers={
                     "authorization": f"Bearer {token}",
                     "content-type": "application/json",
@@ -62,6 +67,8 @@ class AvailityAdapter:
             "availity_submission_accepted",
             payer=document.payer_id,
             confirmation=body.get("trackingNumber"),
+            sandbox=self._sandbox,
+            base_url=self._base_url,
         )
         return SubmissionReceipt(
             request_id=document.request_id,
@@ -79,7 +86,7 @@ class AvailityAdapter:
         client = httpx.AsyncClient(timeout=15.0)  # type: ignore[attr-defined]
         try:
             res = await client.post(
-                "https://api.availity.com/availity/v1/token",
+                f"{self._base_url}/availity/v1/token",
                 data={
                     "grant_type": "client_credentials",
                     "client_id": self._client_id,

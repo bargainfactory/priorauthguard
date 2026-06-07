@@ -21,6 +21,11 @@ class SurescriptsAdapter:
             raise RuntimeError("Surescripts credentials missing")
         self._client_id = client_id
         self._client_secret = client_secret
+        self._base_url = (
+            getattr(self.settings, "surescripts_base_url", None)
+            or "https://api.surescripts.com"
+        ).rstrip("/")
+        self._sandbox = bool(getattr(self.settings, "payer_sandbox_mode", False))
         self._log = get_logger("SurescriptsAdapter")
 
     async def submit(self, document: PADocument) -> SubmissionReceipt:
@@ -31,7 +36,7 @@ class SurescriptsAdapter:
             # exposes a JSON-on-the-edge shape for newer consumers, which we
             # use here. The wire is bearer-token authed.
             res = await client.post(
-                "https://api.surescripts.com/prior-authorization/v1/submit",
+                f"{self._base_url}/prior-authorization/v1/submit",
                 headers={
                     "authorization": f"Bearer {await self._token(httpx)}",
                     "content-type": "application/json",
@@ -49,6 +54,8 @@ class SurescriptsAdapter:
             "surescripts_accepted",
             payer=document.payer_id,
             confirmation=out.get("paId"),
+            sandbox=self._sandbox,
+            base_url=self._base_url,
         )
         return SubmissionReceipt(
             request_id=document.request_id,
@@ -63,7 +70,7 @@ class SurescriptsAdapter:
         client = httpx.AsyncClient(timeout=15.0)  # type: ignore[attr-defined]
         try:
             res = await client.post(
-                "https://api.surescripts.com/oauth2/v1/token",
+                f"{self._base_url}/oauth2/v1/token",
                 data={
                     "grant_type": "client_credentials",
                     "client_id": self._client_id,

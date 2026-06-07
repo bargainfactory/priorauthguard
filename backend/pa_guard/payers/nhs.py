@@ -19,6 +19,11 @@ class NhsSpineAdapter:
         if not api_key:
             raise RuntimeError("NHS Spine credentials missing")
         self._api_key = api_key
+        self._base_url = (
+            getattr(self.settings, "nhs_spine_base_url", None)
+            or "https://api.spine.nhs.uk"
+        ).rstrip("/")
+        self._sandbox = bool(getattr(self.settings, "payer_sandbox_mode", False))
         self._log = get_logger("NhsSpineAdapter")
 
     async def submit(self, document: PADocument) -> SubmissionReceipt:
@@ -29,7 +34,7 @@ class NhsSpineAdapter:
             # we transmit a minimal de-identified JSON shape and let the
             # gateway adapt it.
             res = await client.post(
-                "https://api.spine.nhs.uk/specialised-commissioning/v1/requests",
+                f"{self._base_url}/specialised-commissioning/v1/requests",
                 headers={
                     "authorization": f"Bearer {self._api_key}",
                     "content-type": "application/fhir+json",
@@ -54,6 +59,8 @@ class NhsSpineAdapter:
             "nhs_spine_accepted",
             payer=document.payer_id,
             ref=out.get("id"),
+            sandbox=self._sandbox,
+            base_url=self._base_url,
         )
         return SubmissionReceipt(
             request_id=document.request_id,

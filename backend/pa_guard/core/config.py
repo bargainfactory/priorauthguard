@@ -82,16 +82,30 @@ class Settings(BaseSettings):
     )
 
     # --- Payer adapters (Phase 5) ---
+    # `*_base_url` lets ops point an adapter at the payer's sandbox during
+    # onboarding without touching code. Unset → adapter uses the production
+    # URL hard-coded in its module.
     availity_client_id: str | None = None
     availity_client_secret: str | None = None
+    availity_base_url: str | None = None
     covermymeds_api_key: str | None = None
+    covermymeds_base_url: str | None = None
     surescripts_client_id: str | None = None
     surescripts_client_secret: str | None = None
+    surescripts_base_url: str | None = None
     fax_api_url: str | None = None
     fax_api_key: str | None = None
     fax_from_number: str | None = None
     fax_to_number: str | None = None
     nhs_spine_api_key: str | None = None
+    nhs_spine_base_url: str | None = None
+    payer_sandbox_mode: bool = Field(
+        default=False,
+        description=(
+            "When true, adapters log calls as sandbox requests and the "
+            "smoke-test script targets non-production credentials."
+        ),
+    )
 
     # --- LLM-backed MetaImprover (Phase 5) ---
     anthropic_api_key: str | None = None
@@ -105,6 +119,24 @@ class Settings(BaseSettings):
             "Base URL of an OPA server (e.g. http://opa:8181). When unset, the "
             "OpaPolicyEngine is a no-op."
         ),
+    )
+
+    # --- OpenTelemetry observability (v1.0.1) ---
+    otel_enabled: bool = Field(
+        default=False,
+        description="Master switch for the OTel SDK. Off by default so dev / test stay quiet.",
+    )
+    otel_service_name: str = "pa-guard"
+    otel_service_version: str = "1.0.1"
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4317",
+        description="OTLP gRPC endpoint of the collector (Tempo / Jaeger / OTel Collector).",
+    )
+    otel_traces_sample_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="ParentBased(TraceIdRatioBased) sampler ratio.",
     )
 
 

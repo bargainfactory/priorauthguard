@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   AudioLines,
+  Building2,
   Gauge,
   KeyRound,
   ShieldCheck,
@@ -18,6 +19,7 @@ const NAV = [
   { href: "/voice", label: "Voice", icon: AudioLines },
   { href: "/meta-improver", label: "Meta-Improver", icon: Sparkles },
   { href: "/zk", label: "zk-STARK", icon: KeyRound },
+  { href: "/admin", label: "Tenants", icon: Building2 },
 ] as const;
 
 export function Sidebar() {

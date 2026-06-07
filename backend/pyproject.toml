@@ -80,6 +80,15 @@ zkstark = [
     # zk-STARK proof system bindings (placeholder until Phase 2).
 ]
 
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48",
+    "opentelemetry-instrumentation-httpx>=0.48",
+]
+
 [project.urls]
 Repository = "https://github.com/bargainfactory/priorauthguard"
 

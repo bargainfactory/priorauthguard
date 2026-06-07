@@ -4,6 +4,7 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { getReadyz } from "@/lib/api";
 import type { ReadyzResponse } from "@/types/api";
@@ -43,6 +44,7 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
         ) : (
           <Badge variant="info">Loading…</Badge>
         )}
+        <TenantSwitcher />
         <ThemeSwitcher />
       </div>
     </header>

@@ -6,6 +6,7 @@
  * a same-origin deployment or an env-pinned absolute URL.
  */
 
+import { getApiTenantId } from "@/lib/tenant";
 import type {
   DictationResponse,
   ImprovementProposal,
@@ -21,10 +22,14 @@ async function request<T>(
   path: string,
   init?: RequestInit & { signal?: AbortSignal },
 ): Promise<T> {
+  const tenantId = getApiTenantId();
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
+      // Scope every request to the current tenant. The backend rejects
+      // requests where the header conflicts with the body's tenant_id.
+      "X-Tenant-Id": tenantId,
       ...init?.headers,
     },
     // The browser must not cache PA data — this is operational, not static.
@@ -73,13 +78,22 @@ export interface RunPABody {
     procedure_code: string;
     diagnosis_codes: string[];
     urgency: "routine" | "urgent" | "emergent";
+    tenant_id?: string;
   };
 }
 
 export function runPA(body: RunPABody, signal?: AbortSignal) {
+  // Inject the active tenant if the caller didn't set one — the backend
+  // requires meta.tenant_id and X-Tenant-Id to match, so we keep them
+  // aligned at the source.
+  const tenantId = getApiTenantId();
+  const merged: RunPABody = {
+    ...body,
+    meta: { ...body.meta, tenant_id: body.meta.tenant_id ?? tenantId },
+  };
   return request<PARunResponse>("/v1/pa", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(merged),
     signal,
   });
 }
