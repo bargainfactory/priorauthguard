@@ -1,0 +1,41 @@
+{
+  "name": "pa-guard-web",
+  "version": "0.3.0",
+  "private": true,
+  "description": "PriorAuthGuard — Next.js 15 web frontend (light + dark, ROI dashboard, PrivacyFHEPanel).",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.0.3",
+    "react": "19.0.0-rc-66855b96-20241106",
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "next-themes": "0.4.3",
+    "lucide-react": "0.456.0",
+    "class-variance-authority": "0.7.0",
+    "clsx": "2.1.1",
+    "tailwind-merge": "2.5.4",
+    "@radix-ui/react-slot": "1.1.0",
+    "@radix-ui/react-tabs": "1.1.1",
+    "@radix-ui/react-progress": "1.1.0",
+    "@radix-ui/react-separator": "1.1.0",
+    "@radix-ui/react-label": "2.1.0",
+    "sonner": "1.7.0"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/node": "22.9.0",
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "tailwindcss": "3.4.14",
+    "postcss": "8.4.49",
+    "autoprefixer": "10.4.20",
+    "tailwindcss-animate": "1.0.7",
+    "eslint": "9.14.0",
+    "eslint-config-next": "15.0.3"
+  }
+}
