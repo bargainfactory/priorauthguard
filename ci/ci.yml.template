@@ -388,12 +388,79 @@ jobs:
           path: frontend/android/app/build/outputs/apk/release/*.apk
 
   # -----------------------------------------------------------------------
+  # Tauri update manifest — built only on tags. Generates the
+  # `data/desktop-updates.json` minisign-signed manifest that the
+  # backend's /v1/updates endpoint serves to the desktop auto-updater.
+  # -----------------------------------------------------------------------
+  desktop-updates-manifest:
+    name: Sign + publish desktop update manifest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tauri]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ./backend
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Write keys to disk
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PUBKEY: ${{ secrets.MINISIGN_PUBKEY }}
+        run: |
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          printf '%s\n' "$MINISIGN_PUBKEY"   > /tmp/minisign.pub
+          chmod 600 /tmp/minisign.key
+      - name: Compose manifest
+        env:
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_URL="https://releases.priorauthguard.com/desktop/${GITHUB_REF_NAME}"
+          # Resolve the artifact paths the tauri matrix uploaded.
+          # Each platform's directory is named tauri-<os>-<rust-target>.
+          ARTIFACTS=()
+          for dir in artifacts/tauri-*; do
+            target=$(basename "$dir" | sed 's/^tauri-//' | sed 's/-.*//' )
+            file=$(find "$dir" -type f \( -name "*.AppImage.tar.gz" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.nsis.zip" \) | head -1)
+            [ -z "$file" ] && continue
+            case "$target" in
+              ubuntu)  TARGET=linux-x86_64 ;;
+              macos)   TARGET=darwin-x86_64 ;;
+              windows) TARGET=windows-x86_64 ;;
+            esac
+            ARTIFACTS+=("${TARGET}=${file}")
+          done
+          python -m scripts.publish_release_manifest \
+            --version "$VERSION" \
+            --base-url "$BASE_URL" \
+            --secret-key /tmp/minisign.key \
+            --pubkey /tmp/minisign.pub \
+            --manifest-out data/desktop-updates.json \
+            --artifacts "${ARTIFACTS[@]}"
+        working-directory: backend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-updates-manifest
+          path: backend/data/desktop-updates.json
+
+  # -----------------------------------------------------------------------
   # GitHub release — publishes all signed binaries on a tag.
   # -----------------------------------------------------------------------
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [docker, tauri, android]
+    needs: [docker, tauri, android, desktop-updates-manifest]
     runs-on: ubuntu-latest
     permissions:
       contents: write

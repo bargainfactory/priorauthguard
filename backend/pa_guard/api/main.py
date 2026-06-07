@@ -71,6 +71,7 @@ from ..storage.pa_registry import (
     PARegistry,
     SqlPARegistry,
 )
+from .metrics import router as metrics_router
 from .updates import router as updates_router
 from .voice_stream import router as voice_stream_router
 
@@ -157,6 +158,8 @@ app.add_middleware(
 app.include_router(voice_stream_router)
 # Desktop update manifest (consumed by tauri-plugin-updater).
 app.include_router(updates_router)
+# Prometheus scrape target — exposes SLO snapshot + per-agent aggregates.
+app.include_router(metrics_router)
 
 
 # ---------------------------------------------------------------------------

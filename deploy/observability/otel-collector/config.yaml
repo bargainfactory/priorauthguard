@@ -1,0 +1,67 @@
+# OpenTelemetry Collector — local development pipeline.
+#
+# Accepts OTLP traces from the backend (`PAG_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel:4317`)
+# and SLO metrics scraped via Prometheus, fans them out to Tempo (traces) and
+# Prometheus (metrics), and tags everything with `service.name=pa-guard`.
+#
+# Production deployments use a managed collector (e.g. AWS ADOT, GCP Ops Agent);
+# this config keeps the local fan-out simple and self-contained.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: pa-guard-backend
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['backend:8080']
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 512
+    spike_limit_mib: 128
+  attributes/strip_pii:
+    actions:
+      # Defense-in-depth: even though the backend never attaches PHI to
+      # spans, drop any attribute that looks like it might leak text from
+      # critiques or transcripts before the trace lands in Tempo.
+      - key: pa_guard.kpi.narrative
+        action: delete
+      - key: pa_guard.what_failed
+        action: delete
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/strip_pii, batch]
+      exporters: [otlp/tempo, debug]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch]
+      exporters: [prometheusremotewrite, debug]
+  telemetry:
+    logs:
+      level: info
