@@ -1,0 +1,91 @@
+# Default values for pa-guard.
+
+image:
+  repository: ghcr.io/bargainfactory/priorauthguard
+  tag: "0.5.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: pa.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+env:
+  PAG_ENVIRONMENT: production
+  PAG_PA_REGISTRY_BACKEND: sql
+  PAG_FHE_ENABLED: "false"     # flip to "true" once the Concrete ML circuit lands
+  PAG_ZKSTARK_ENABLED: "false"
+
+# Secrets MUST come from an external SecretStore (Vault / AWS SM / ESO).
+# Names below align with the env-var prefix PAG_*.
+externalSecrets:
+  enabled: true
+  refreshInterval: 1h
+  secretStoreRef:
+    name: cluster-secret-store
+    kind: ClusterSecretStore
+  # Map external secret keys to env vars.
+  envFrom:
+    - PAG_DATABASE_URL
+    - PAG_AVAILITY_CLIENT_ID
+    - PAG_AVAILITY_CLIENT_SECRET
+    - PAG_COVERMYMEDS_API_KEY
+    - PAG_SURESCRIPTS_CLIENT_ID
+    - PAG_SURESCRIPTS_CLIENT_SECRET
+    - PAG_FAX_API_KEY
+    - PAG_NHS_SPINE_API_KEY
+    - PAG_ANTHROPIC_API_KEY
+
+# Embedded Postgres + pgvector (off by default; production uses a managed instance).
+postgresql:
+  enabled: false
+  auth:
+    username: paguard
+    database: paguard
+  primary:
+    persistence:
+      size: 20Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10

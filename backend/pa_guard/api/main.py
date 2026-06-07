@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..agents.denial_appeal import AppealInput, DenialAppealAgent
 from ..agents.meta_improver import MetaImproverAgent
+from ..agents.meta_improver_llm import MetaImproverLLM
 from ..agents.privacy_guardian import IntakePayload, PrivacyGuardianAgent
 from ..agents.supervisor import PASupervisor, SupervisorConfig
 from ..core.config import get_settings
@@ -58,8 +59,11 @@ from ..core.models import (
     SubmissionReceipt,
     ZkStarkProof,
 )
+from ..payers.registry import PayerAdapterRegistry
 from ..services.fhe_inference import FHEInferenceService
 from ..services.zkstark import ZkStarkVerifier
+from ..storage.pa_registry import InMemoryPARegistry, PARegistry, SqlPARegistry
+from .voice_stream import router as voice_stream_router
 
 
 @asynccontextmanager
@@ -77,20 +81,57 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Long-lived singletons.
     app.state.privacy_guardian = PrivacyGuardianAgent()
     app.state.fhe = FHEInferenceService(settings=settings)
-    app.state.supervisor = PASupervisor(config=SupervisorConfig())
+    app.state.payer_registry = PayerAdapterRegistry(settings=settings)
+    app.state.supervisor = PASupervisor(
+        config=SupervisorConfig(),
+        # Wire the payer adapter registry into the SubmissionAgent so real
+        # adapters are picked when payer credentials are present.
+    )
+    # The supervisor's SubmissionAgent has its own `_adapters` map; promote
+    # the per-payer adapter resolution to the supervisor's submission call.
+    _wire_payer_adapters(app.state.supervisor, app.state.payer_registry)
+
     app.state.appealer = DenialAppealAgent()
-    app.state.meta_improver = MetaImproverAgent()
+    app.state.meta_improver_heuristic = MetaImproverAgent()
+    app.state.meta_improver_llm = MetaImproverLLM(settings=settings)
     app.state.zk_verifier = ZkStarkVerifier(settings=settings)
-    # In-memory registries (Phase 2). Phase 5 promotes these to Postgres.
-    app.state.pa_registry = {}
+
+    # PA registry — sql when PAG_PA_REGISTRY_BACKEND=sql, in-memory otherwise.
+    pa_registry: PARegistry
+    if settings.pa_registry_backend == "sql":
+        pa_registry = SqlPARegistry(database_url=settings.database_url)
+    else:
+        pa_registry = InMemoryPARegistry()
+    app.state.pa_registry = pa_registry
     app.state.proposals_registry = {}
     yield
     log.info("api_shutdown")
 
 
+def _wire_payer_adapters(
+    supervisor: PASupervisor, registry: PayerAdapterRegistry
+) -> None:
+    """Replace the supervisor's stub submission with a payer-aware dispatcher."""
+    submission = supervisor.submission
+    original_run = submission._run  # type: ignore[attr-defined]
+
+    async def dispatch(payload):  # type: ignore[no-untyped-def]
+        payer_id = payload.document.payer_id
+        adapter, channel = registry.resolve(payer_id)
+        # Mutate adapter map for this single dispatch so the agent's lifecycle
+        # / critique path stays intact.
+        submission._adapters[channel] = adapter  # type: ignore[attr-defined]
+        payload = payload.__class__(
+            document=payload.document, preferred_channel=channel
+        )
+        return await original_run(payload)
+
+    submission._run = dispatch  # type: ignore[attr-defined]
+
+
 app = FastAPI(
     title="PriorAuthGuard",
-    version="0.2.0",
+    version="0.5.0",
     description="Privacy-first, self-recursive prior authorization platform.",
     lifespan=lifespan,
 )
@@ -101,6 +142,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# WebSocket streaming voice (Phase 5).
+app.include_router(voice_stream_router)
 
 
 # ---------------------------------------------------------------------------
@@ -205,19 +248,30 @@ async def run_pa(body: PARunRequest) -> PARunResponse:
             final["clarification"].questions if final.get("clarification") else []
         ),
     )
-    # Persist for /v1/pa/{rid} lookups.
+    # Persist via the Phase 5 async registry (in-memory or Postgres).
     if response.pa_request is not None:
-        rid = str(response.pa_request.meta.request_id)
-        app.state.pa_registry[rid] = response.model_dump(mode="json")
+        registry: PARegistry = app.state.pa_registry
+        await registry.put(
+            response.pa_request.meta.request_id,
+            response.model_dump(mode="json"),
+        )
     return response
 
 
 @app.get("/v1/pa/{rid}", response_model=PARunResponse, tags=["pa"])
 async def get_pa(rid: UUID) -> PARunResponse:
-    cached = app.state.pa_registry.get(str(rid))
+    registry: PARegistry = app.state.pa_registry
+    cached = await registry.get(rid)
     if cached is None:
         raise HTTPException(status_code=404, detail=f"PA {rid} not found")
     return PARunResponse.model_validate(cached)
+
+
+@app.get("/v1/pa", response_model=list[PARunResponse], tags=["pa"])
+async def list_pa(limit: int = 50) -> list[PARunResponse]:
+    registry: PARegistry = app.state.pa_registry
+    rows = await registry.list_recent(limit=limit)
+    return [PARunResponse.model_validate(r) for r in rows]
 
 
 class AppealRequestBody(BaseModel):
@@ -309,12 +363,25 @@ async def outcomes_aggregate(window_seconds: int = 0) -> OutcomeAggregate:
     response_model=list[ImprovementProposal],
     tags=["meta-improver"],
 )
-async def meta_improver_propose(window_seconds: int = 0) -> list[ImprovementProposal]:
-    """Run MetaImproverAgent on the current outcome aggregate and persist proposals."""
+async def meta_improver_propose(
+    window_seconds: int = 0,
+    backend: str = "heuristic",
+) -> list[ImprovementProposal]:
+    """Run the MetaImprover on the current outcome aggregate.
+
+    `backend` selects the generator:
+      - "heuristic" (default) — deterministic Phase 2 engine.
+      - "llm"                 — Anthropic Claude (falls back to heuristic
+                                when ANTHROPIC_API_KEY is missing).
+    """
     supervisor: PASupervisor = app.state.supervisor
-    meta: MetaImproverAgent = app.state.meta_improver
     agg = await supervisor.outcome_logger.aggregate(window_seconds=window_seconds)
-    proposals = meta.propose(agg)
+    if backend == "llm":
+        llm: MetaImproverLLM = app.state.meta_improver_llm
+        proposals = await llm.propose(agg)
+    else:
+        heuristic: MetaImproverAgent = app.state.meta_improver_heuristic
+        proposals = heuristic.propose(agg)
     for p in proposals:
         app.state.proposals_registry[str(p.proposal_id)] = p
     return proposals

@@ -76,6 +76,27 @@ class Settings(BaseSettings):
     # --- Storage ---
     database_url: str = "postgresql+asyncpg://localhost/paguard"
     audit_log_dir: Path = Field(default=Path("logs/audit"))
+    pa_registry_backend: str = Field(
+        default="memory",
+        description="One of 'memory' or 'sql'. When 'sql', uses `database_url`.",
+    )
+
+    # --- Payer adapters (Phase 5) ---
+    availity_client_id: str | None = None
+    availity_client_secret: str | None = None
+    covermymeds_api_key: str | None = None
+    surescripts_client_id: str | None = None
+    surescripts_client_secret: str | None = None
+    fax_api_url: str | None = None
+    fax_api_key: str | None = None
+    fax_from_number: str | None = None
+    fax_to_number: str | None = None
+    nhs_spine_api_key: str | None = None
+
+    # --- LLM-backed MetaImprover (Phase 5) ---
+    anthropic_api_key: str | None = None
+    meta_improver_model: str = "claude-sonnet-4-6"
+    meta_improver_max_tokens: int = 1024
 
 
 @lru_cache(maxsize=1)

@@ -1,0 +1,58 @@
+name: priorauthguard
+
+# Local + CI stack: backend + Postgres-with-pgvector + pgAdmin (optional).
+#
+# Boot with:
+#   docker compose up --build
+#
+# Phase 5 promotion notes:
+# - `db` uses pgvector/pgvector — same image production runs on.
+# - `backend` flips PAG_PA_REGISTRY_BACKEND=sql so the SqlPARegistry takes
+#   over from InMemoryPARegistry.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: paguard
+      POSTGRES_PASSWORD: paguard_dev_only
+      POSTGRES_DB: paguard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paguard -d paguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PAG_ENVIRONMENT: development
+      PAG_API_HOST: 0.0.0.0
+      PAG_API_PORT: "8080"
+      PAG_DATABASE_URL: postgresql+asyncpg://paguard:paguard_dev_only@db:5432/paguard
+      PAG_PA_REGISTRY_BACKEND: sql
+      PAG_FHE_ENABLED: "false"
+      PAG_ZKSTARK_ENABLED: "false"
+      # Provide real payer + LLM credentials via an .env file in production.
+    ports:
+      - "8080:8080"
+
+  pgadmin:
+    profiles: ["debug"]
+    image: dpage/pgadmin4:8.13
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@priorauthguard.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+
+volumes:
+  pgdata:

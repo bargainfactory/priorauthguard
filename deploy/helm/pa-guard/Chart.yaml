@@ -1,0 +1,18 @@
+apiVersion: v2
+name: pa-guard
+description: |
+  PriorAuthGuard — privacy-first prior authorization platform.
+  Deploys the FastAPI backend, with optional Postgres dependency (pgvector).
+type: application
+version: 0.5.0
+appVersion: "0.5.0"
+keywords:
+  - healthcare
+  - prior-authorization
+  - HIPAA
+  - FHE
+  - zk-STARK
+sources:
+  - https://github.com/bargainfactory/priorauthguard
+maintainers:
+  - name: PriorAuthGuard Team
