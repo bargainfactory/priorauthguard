@@ -311,6 +311,131 @@ class VoiceCallOutcome(_StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# Policy research / RAG
+# ---------------------------------------------------------------------------
+
+class PolicyEvidence(_StrictModel):
+    """A single piece of payer / clinical policy evidence returned by RAG."""
+
+    evidence_id: UUID = Field(default_factory=uuid4)
+    source: str = Field(description="e.g. 'CMS NCD 220.6', 'Anthem CG-MED-67'.")
+    jurisdiction_tags: list[Jurisdiction] = Field(default_factory=list)
+    payer_id: str | None = None
+    excerpt: str
+    similarity: float = Field(ge=0.0, le=1.0)
+    citation_url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Document generation
+# ---------------------------------------------------------------------------
+
+class ClinicalCriterionStatus(StrEnum):
+    MET = "met"
+    NOT_MET = "not-met"
+    UNKNOWN = "unknown"
+
+
+class ClinicalCriterion(_StrictModel):
+    """Structured criterion the payer expects to see addressed."""
+
+    label: str
+    status: ClinicalCriterionStatus = ClinicalCriterionStatus.UNKNOWN
+    rationale: str
+    evidence_ids: list[UUID] = Field(default_factory=list)
+
+
+class PADocument(_StrictModel):
+    """De-identified Prior Authorization submission document."""
+
+    document_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    payer_id: str
+    procedure_code: str
+    diagnosis_codes: list[str]
+    medical_necessity_narrative: str
+    criteria: list[ClinicalCriterion] = Field(default_factory=list)
+    citations: list[UUID] = Field(default_factory=list)
+    generated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Submission / payer interaction
+# ---------------------------------------------------------------------------
+
+class SubmissionChannel(StrEnum):
+    API = "payer-api"
+    PORTAL = "payer-portal"
+    FAX = "fax"
+    VOICE = "voice"
+
+
+class SubmissionReceipt(_StrictModel):
+    receipt_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    channel: SubmissionChannel
+    payer_id: str
+    confirmation_code: str | None = None
+    submitted_at: datetime = Field(default_factory=_utcnow)
+    expected_response_seconds: int | None = Field(default=None, ge=0)
+
+
+# ---------------------------------------------------------------------------
+# Denial / appeal
+# ---------------------------------------------------------------------------
+
+class DenialReport(_StrictModel):
+    denial_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    reason_codes: list[str] = Field(default_factory=list)
+    summary: str
+    appealable: bool = True
+    detected_at: datetime = Field(default_factory=_utcnow)
+
+
+class AppealDocument(_StrictModel):
+    appeal_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    denial_id: UUID
+    counter_arguments: list[str] = Field(default_factory=list)
+    additional_evidence_ids: list[UUID] = Field(default_factory=list)
+    narrative: str
+    generated_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Compliance audit
+# ---------------------------------------------------------------------------
+
+class ComplianceFinding(_StrictModel):
+    rule_id: str
+    severity: Literal["info", "warning", "blocker"]
+    message: str
+
+
+class ComplianceAuditReport(_StrictModel):
+    audit_id: UUID = Field(default_factory=uuid4)
+    request_id: UUID
+    jurisdiction: JurisdictionTag
+    findings: list[ComplianceFinding] = Field(default_factory=list)
+    blocking: bool = False
+    audited_at: datetime = Field(default_factory=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Intake clarification
+# ---------------------------------------------------------------------------
+
+class IntakeClarificationRequest(_StrictModel):
+    """Returned by IntakeAgent when the supervisor needs a human (or upstream
+    system) to fill a gap before the PA can proceed."""
+
+    request_id: UUID
+    missing_fields: list[str]
+    questions: list[str]
+
+
+# ---------------------------------------------------------------------------
 # Self-critique / OutcomeLogger payloads
 # ---------------------------------------------------------------------------
 
@@ -330,18 +455,29 @@ class AgentCritique(_StrictModel):
 
 __all__ = [
     "AgentCritique",
+    "AppealDocument",
+    "ClinicalCriterion",
+    "ClinicalCriterionStatus",
+    "ComplianceAuditReport",
+    "ComplianceFinding",
     "DeidMethod",
     "DeidentificationReport",
+    "DenialReport",
     "FHEInferenceRequest",
     "FHEInferenceResult",
+    "IntakeClarificationRequest",
     "JurisdictionTag",
+    "PADocument",
     "PARequest",
     "PARequestMeta",
     "PAStatus",
     "PatientPseudoId",
+    "PolicyEvidence",
     "RawClinicalNote",
     "SafeClinicalContext",
     "SensitivityTier",
+    "SubmissionChannel",
+    "SubmissionReceipt",
     "VoiceCallOutcome",
     "VoiceChannel",
     "VoiceTranscriptChunk",

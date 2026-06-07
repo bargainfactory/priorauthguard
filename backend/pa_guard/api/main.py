@@ -1,37 +1,57 @@
-"""FastAPI app — Phase 0 surface.
+"""FastAPI app — Phase 1 surface.
 
-Exposes:
+Adds the full PA lifecycle (the supervisor-driven graph) on top of the
+Phase 0 entry points.
+
+Endpoints
+---------
+Meta
 - `GET  /healthz`            liveness
-- `GET  /readyz`             readiness (lists FHE circuits, voice channels)
-- `POST /v1/intake`          run a raw clinical note through PrivacyGuardian
-- `POST /v1/fhe/infer`       run a registered FHE circuit (baseline in Phase 0)
+- `GET  /readyz`             readiness (FHE / voice / zk-STARK posture)
+
+Phase 0
+- `POST /v1/intake`          run PrivacyGuardian on a raw note (de-id only)
+- `POST /v1/fhe/infer`       run a registered FHE circuit (baseline today)
+
+Phase 1
+- `POST /v1/pa`              run the full PA pipeline through the supervisor
+- `POST /v1/pa/{rid}/appeal` run the denial-appeal subflow for an existing PA
+- `POST /v1/voice/dictation` open a one-shot dictation transcription cycle
+  (Phase 5 upgrades this to a true WS stream)
 
 PHI considerations
 ------------------
-* `/v1/intake` is the **only** endpoint that accepts PHI-bearing payloads.
-  The raw note is de-identified inside the request handler and dropped from
-  memory before the response is built. The response NEVER contains the raw
-  note text — only the de-identified `cleaned_text` and the audit report.
+* `/v1/intake` and `/v1/pa` are the **only** endpoints that accept PHI.
+  Both run de-identification inside the request handler; responses never
+  contain raw clinical text.
 """
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from ..agents.denial_appeal import AppealInput, DenialAppealAgent
 from ..agents.privacy_guardian import IntakePayload, PrivacyGuardianAgent
+from ..agents.supervisor import PASupervisor, SupervisorConfig
 from ..core.config import get_settings
 from ..core.logging import configure_logging, get_logger
 from ..core.models import (
+    AppealDocument,
+    ComplianceAuditReport,
+    DenialReport,
     FHEInferenceRequest,
     FHEInferenceResult,
+    PADocument,
     PARequest,
     PARequestMeta,
+    PolicyEvidence,
     RawClinicalNote,
+    SubmissionReceipt,
 )
 from ..services.fhe_inference import FHEInferenceService
 
@@ -48,15 +68,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         voice_on_device=settings.voice_on_device_enabled,
         voice_cloud=settings.voice_cloud_enabled,
     )
+    # Long-lived singletons.
     app.state.privacy_guardian = PrivacyGuardianAgent()
     app.state.fhe = FHEInferenceService(settings=settings)
+    app.state.supervisor = PASupervisor(config=SupervisorConfig())
+    app.state.appealer = DenialAppealAgent()
+    # In-memory PA registry (Phase 1). Phase 2 swaps this for Postgres.
+    app.state.pa_registry = {}
     yield
     log.info("api_shutdown")
 
 
 app = FastAPI(
     title="PriorAuthGuard",
-    version="0.1.0",
+    version="0.2.0",
     description="Privacy-first, self-recursive prior authorization platform.",
     lifespan=lifespan,
 )
@@ -96,7 +121,7 @@ async def readyz() -> dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
-# Intake
+# Phase 0 endpoints
 # ---------------------------------------------------------------------------
 
 class IntakeRequestBody(BaseModel):
@@ -113,10 +138,6 @@ async def intake(body: IntakeRequestBody) -> PARequest:
     return await guardian.run(request_id=uuid4(), payload=payload)
 
 
-# ---------------------------------------------------------------------------
-# FHE inference
-# ---------------------------------------------------------------------------
-
 @app.post("/v1/fhe/infer", response_model=FHEInferenceResult, tags=["fhe"])
 async def fhe_infer(req: FHEInferenceRequest) -> FHEInferenceResult:
     fhe: FHEInferenceService = app.state.fhe
@@ -128,3 +149,133 @@ async def fhe_infer(req: FHEInferenceRequest) -> FHEInferenceResult:
         raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — full PA lifecycle
+# ---------------------------------------------------------------------------
+
+class PARunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note: RawClinicalNote
+    meta: PARequestMeta
+
+
+class PARunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    pa_request: PARequest | None = None
+    evidence: list[PolicyEvidence] = Field(default_factory=list)
+    document: PADocument | None = None
+    audit: ComplianceAuditReport | None = None
+    receipt: SubmissionReceipt | None = None
+    needs_human_approval: bool = False
+    clarification_questions: list[str] = Field(default_factory=list)
+
+
+@app.post("/v1/pa", response_model=PARunResponse, tags=["pa"])
+async def run_pa(body: PARunRequest) -> PARunResponse:
+    supervisor: PASupervisor = app.state.supervisor
+    final = await supervisor.run(note=body.note, meta=body.meta)
+
+    response = PARunResponse(
+        status=final.get("status", "intake"),
+        pa_request=final.get("pa_request"),
+        evidence=final.get("evidence", []),
+        document=final.get("document"),
+        audit=final.get("audit"),
+        receipt=final.get("receipt"),
+        needs_human_approval=final.get("needs_human_approval", False),
+        clarification_questions=(
+            final["clarification"].questions if final.get("clarification") else []
+        ),
+    )
+    # Persist for /v1/pa/{rid} lookups.
+    if response.pa_request is not None:
+        rid = str(response.pa_request.meta.request_id)
+        app.state.pa_registry[rid] = response.model_dump(mode="json")
+    return response
+
+
+@app.get("/v1/pa/{rid}", response_model=PARunResponse, tags=["pa"])
+async def get_pa(rid: UUID) -> PARunResponse:
+    cached = app.state.pa_registry.get(str(rid))
+    if cached is None:
+        raise HTTPException(status_code=404, detail=f"PA {rid} not found")
+    return PARunResponse.model_validate(cached)
+
+
+class AppealRequestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    denial: DenialReport
+    document: PADocument
+    evidence: list[PolicyEvidence] = Field(default_factory=list)
+
+
+@app.post("/v1/pa/{rid}/appeal", response_model=AppealDocument, tags=["pa"])
+async def appeal_pa(rid: UUID, body: AppealRequestBody) -> AppealDocument:
+    if body.document.request_id != rid:
+        raise HTTPException(
+            status_code=400,
+            detail="document.request_id does not match path rid",
+        )
+    appealer: DenialAppealAgent = app.state.appealer
+    return await appealer.run(
+        request_id=rid,
+        payload=AppealInput(
+            denial=body.denial,
+            document=body.document,
+            evidence=body.evidence,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice (one-shot dictation)
+# ---------------------------------------------------------------------------
+
+class DictationRequest(BaseModel):
+    """One-shot dictation: client sends already-transcribed text from its
+    on-device Whisper and the server de-identifies it.
+
+    Phase 5 upgrades this to a full WebSocket audio stream + server-side
+    on-device Whisper for clients that can't transcribe locally.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    speaker_role: str = "provider"
+
+
+class DictationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cleaned_text: str
+    identifiers_redacted: int
+
+
+@app.post("/v1/voice/dictation", response_model=DictationResponse, tags=["voice"])
+async def voice_dictation(body: DictationRequest) -> DictationResponse:
+    from datetime import UTC, datetime
+
+    from ..core.models import VoiceChannel, VoiceTranscriptChunk
+
+    guardian: PrivacyGuardianAgent = app.state.privacy_guardian
+    now = datetime.now(UTC)
+    chunk = VoiceTranscriptChunk(
+        channel=VoiceChannel.ON_DEVICE_WHISPER,
+        speaker_role=body.speaker_role,  # type: ignore[arg-type]
+        text=body.text,
+        started_at=now,
+        ended_at=now,
+        on_device=True,
+    )
+    result = await guardian.deidentify_transcript(chunk)
+    return DictationResponse(
+        cleaned_text=result.cleaned_text,
+        identifiers_redacted=sum(result.deid_report.identifier_counts.values()),
+    )

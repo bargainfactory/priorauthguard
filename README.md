@@ -16,9 +16,9 @@ PriorAuthGuard is a production-grade autonomous multi-agent system that takes a 
 
 | Phase | Scope | Status |
 |------:|-------|--------|
-| **0** | Scaffolding • core models • PrivacyGuardian (Safe Harbor) • FHEInferenceService skeleton • VoiceService + VoiceOrchestrator skeleton | ✅ in this commit |
-| 1 | Full agent graph • self-critique • RAG • compliance engine • full VoiceOrchestrator | planned |
-| 2 | Full QAT/Brevitas FHE • zk-STARK proofs • MetaImprover • OutcomeLogger with FHE/voice metrics | planned |
+| **0** | Scaffolding • core models • PrivacyGuardian (Safe Harbor) • FHEInferenceService skeleton • VoiceService + VoiceOrchestrator skeleton | ✅ shipped |
+| **1** | LangGraph supervisor • Intake / PolicyResearcher / DocumentGenerator / Submission / DenialAppeal / ComplianceAuditor / OutcomeLogger • RAG • jurisdiction rule packs (US 50+DC+fed, Canada fed+13, UK) • learned NER overlay • cloud voice adapters | ✅ shipped |
+| 2 | Full QAT/Brevitas FHE • zk-STARK proofs • MetaImprover • OutcomeLogger with FHE/voice metrics (Postgres sink) | planned |
 | 3 | Web frontend (light/dark) • ROI Dashboard • `PrivacyFHEPanel.tsx` | planned |
 | 4 | Tauri + Capacitor + native on-device Whisper | planned |
 | 5 | Integrations • advanced voice • full self-improvement loop • polish • deploy | planned |
